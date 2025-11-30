@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="BUILD Assessment">
+    <title>BUILD Tier 2 Assessment</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --build-red: #DC2626;
+            --build-red-dark: #B91C1C;
+            --build-charcoal: #1F2937;
+            --build-slate: #374151;
+            --build-light: #F9FAFB;
+            --build-border: #E5E7EB;
+            
+            --score-excellent: #059669;
+            --score-good: #10B981;
+            --score-average: #F59E0B;
+            --score-needs-work: #F97316;
+            --score-concern: #DC2626;
+            
+            --radius: 12px;
+            --shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%);
+            color: var(--build-charcoal);
+            min-height: 100vh;
+            padding-bottom: 100px;
+        }
+        
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, var(--build-red) 0%, var(--build-red-dark) 100%);
+            color: white;
+            padding: 20px 16px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .header-content {
+            max-width: 800px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            font-family: 'Space Mono', monospace;
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+        
+        .logo span {
+            opacity: 0.8;
+            font-weight: 400;
+            font-size: 0.875rem;
+            display: block;
+        }
+        
+        .overall-grade {
+            background: rgba(255,255,255,0.2);
+            backdrop-filter: blur(10px);
+            padding: 8px 16px;
+            border-radius: 50px;
+            font-weight: 700;
+            font-size: 1.25rem;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+        
+        /* Main Container */
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        
+        /* Section Cards */
+        .section {
+            background: white;
+            border-radius: var(--radius);
+            margin-bottom: 12px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            border: 1px solid var(--build-border);
+        }
+        
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        .section-header:hover {
+            background: var(--build-light);
+        }
+        
+        .section-header:active {
+            background: #E5E7EB;
+        }
+        
+        .section-title {
+            font-weight: 600;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .section-icon {
+            width: 32px;
+            height: 32px;
+            background: var(--build-light);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+        }
+        
+        .section-toggle {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--build-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.3s ease;
+            font-size: 0.875rem;
+            color: var(--build-slate);
+        }
+        
+        .section.expanded .section-toggle {
+            transform: rotate(180deg);
+        }
+        
+        .section-content {
+            display: none;
+            padding: 0 16px 16px;
+            border-top: 1px solid var(--build-border);
+        }
+        
+        .section.expanded .section-content {
+            display: block;
+        }
+        
+        /* Form Elements */
+        .form-group {
+            margin-top: 16px;
+        }
+        
+        .form-label {
+            display: block;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--build-slate);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 12px 14px;
+            border: 2px solid var(--build-border);
+            border-radius: 8px;
+            font-size: 1rem;
+            font-family: inherit;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            background: white;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: var(--build-red);
+            box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        
+        /* Score Select */
+        .score-select {
+            appearance: none;
+            -webkit-appearance: none;
+            background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23374151' d='M6 8L1 3h10z'/%3E%3C/svg%3E") no-repeat right 14px center;
+            padding-right: 40px;
+            cursor: pointer;
+        }
+        
+        .score-select.excellent { border-color: var(--score-excellent); background-color: rgba(5, 150, 105, 0.05); }
+        .score-select.good { border-color: var(--score-good); background-color: rgba(16, 185, 129, 0.05); }
+        .score-select.average { border-color: var(--score-average); background-color: rgba(245, 158, 11, 0.05); }
+        .score-select.needs-work { border-color: var(--score-needs-work); background-color: rgba(249, 115, 22, 0.05); }
+        .score-select.concern { border-color: var(--score-concern); background-color: rgba(220, 38, 38, 0.05); }
+        
+        /* FMS Buttons */
+        .fms-test {
+            margin-top: 16px;
+            padding: 12px;
+            background: var(--build-light);
+            border-radius: 8px;
+        }
+        
+        .fms-test-name {
+            font-weight: 600;
+            margin-bottom: 10px;
+            font-size: 0.9375rem;
+        }
+        
+        .fms-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .fms-btn {
+            flex: 1;
+            padding: 12px 8px;
+            border: 2px solid var(--build-border);
+            border-radius: 8px;
+            background: white;
+            font-size: 1rem;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        .fms-btn:hover {
+            border-color: var(--build-slate);
+        }
+        
+        .fms-btn.selected-0 { background: var(--score-concern); color: white; border-color: var(--score-concern); }
+        .fms-btn.selected-1 { background: var(--score-needs-work); color: white; border-color: var(--score-needs-work); }
+        .fms-btn.selected-2 { background: var(--score-average); color: white; border-color: var(--score-average); }
+        .fms-btn.selected-3 { background: var(--score-excellent); color: white; border-color: var(--score-excellent); }
+        
+        /* Habit Slider */
+        .habit-slider-container {
+            margin-top: 16px;
+        }
+        
+        .habit-slider-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        
+        .habit-slider-value {
+            font-weight: 700;
+            font-size: 1.25rem;
+            color: var(--build-red);
+        }
+        
+        .habit-slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: linear-gradient(to right, var(--score-concern), var(--score-needs-work), var(--score-average), var(--score-good), var(--score-excellent));
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        
+        .habit-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: white;
+            border: 3px solid var(--build-charcoal);
+            cursor: pointer;
+            box-shadow: var(--shadow);
+        }
+        
+        /* Priority Plan */
+        .priority-textarea {
+            width: 100%;
+            min-height: 80px;
+            padding: 12px 14px;
+            border: 2px solid var(--build-border);
+            border-radius: 8px;
+            font-size: 1rem;
+            font-family: inherit;
+            resize: vertical;
+        }
+        
+        .priority-textarea:focus {
+            outline: none;
+            border-color: var(--build-red);
+            box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+        }
+        
+        /* Bottom Action Bar */
+        .action-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            border-top: 1px solid var(--build-border);
+            padding: 12px 16px;
+            padding-bottom: max(12px, env(safe-area-inset-bottom));
+            display: flex;
+            gap: 12px;
+            z-index: 100;
+            box-shadow: 0 -4px 6px -1px rgba(0,0,0,0.1);
+        }
+        
+        .action-btn {
+            flex: 1;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.9375rem;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        .action-btn-primary {
+            background: var(--build-red);
+            color: white;
+        }
+        
+        .action-btn-primary:hover {
+            background: var(--build-red-dark);
+        }
+        
+        .action-btn-secondary {
+            background: var(--build-light);
+            color: var(--build-charcoal);
+            border: 2px solid var(--build-border);
+        }
+        
+        .action-btn-secondary:hover {
+            background: #E5E7EB;
+        }
+        
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--build-charcoal);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 50px;
+            font-weight: 500;
+            box-shadow: var(--shadow-lg);
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 200;
+        }
+        
+        .toast.show {
+            opacity: 1;
+        }
+        
+        /* Grade Badge */
+        .grade-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 50px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .grade-excellent { background: rgba(5, 150, 105, 0.1); color: var(--score-excellent); }
+        .grade-good { background: rgba(16, 185, 129, 0.1); color: var(--score-good); }
+        .grade-average { background: rgba(245, 158, 11, 0.1); color: var(--score-average); }
+        .grade-needs-work { background: rgba(249, 115, 22, 0.1); color: var(--score-needs-work); }
+        .grade-concern { background: rgba(220, 38, 38, 0.1); color: var(--score-concern); }
+        
+        /* Responsive */
+        @media (max-width: 480px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            
+            .header {
+                padding: 16px;
+            }
+            
+            .logo {
+                font-size: 1.25rem;
+            }
+            
+            .overall-grade {
+                font-size: 1rem;
+                padding: 6px 12px;
+            }
+        }
+        
+        /* Print Styles */
+        @media print {
+            .action-bar, .section-toggle { display: none; }
+            .section-content { display: block !important; }
+            .header { position: relative; }
+            body { padding-bottom: 0; }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                BUILD
+                <span>Tier 2 Assessment</span>
+            </div>
+            <div class="overall-grade" id="overallGrade">Grade: --</div>
+        </div>
+    </header>
+    
+    <main class="container">
+        <!-- Patient Information -->
+        <div class="section expanded" data-section="patient">
+            <div class="section-header" onclick="toggleSection(this)">
+                <div class="section-title">
+                    <div class="section-icon">👤</div>
+                    Patient Information
+                </div>
+                <div class="section-toggle">▼</div>
+            </div>
+            <div class="section-content">
+                <div class="form-group">
+                    <label class="form-label">Patient Name</label>
+                    <input type="text" class="form-input" id="patientName" placeholder="Enter patient name">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Date of Birth</label>
+                        <input type="date" class="form-input" id="patientDob">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Assessment Date</label>
+                        <input type="date" class="form-input" id="assessmentDate">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Assessor</label>
+                    <input type="text" class="form-input" id="assessor" placeholder="Enter assessor name">
+                </div>
+            </div>
+        </div>
+        
+        <!-- Body Composition -->
+        <div class="section" data-section="body">
+            <div class="section-header" onclick="toggleSection(this)">
+                <div class="section-title">
+                    <div class="section-icon">⚖️</div>
+                    Body Composition
+                </div>
+                <div class="section-toggle">▼</div>
+            </div>
+            <div class="section-content">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Weight (lbs)</label>
+                        <input type="number" class="form-input" id="weight" placeholder="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Body Fat %</label>
+                        <select class="form-input score-select" id="bodyFat" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Muscle Mass</label>
+                        <select class="form-input score-select" id="muscleMass" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Visceral Fat</label>
+                        <select class="form-input score-select" id="visceralFat" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Phase Angle</label>
+                    <select class="form-input score-select" id="phaseAngle" onchange="updateScoreClass(this); calculateGrade()">
+                        <option value="">Select...</option>
+                        <option value="5">Excellent</option>
+                        <option value="4">Good</option>
+                        <option value="3">Average</option>
+                        <option value="2">Needs Work</option>
+                        <option value="1">Concern</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Balance & Fall Risk -->
+        <div class="section" data-section="balance">
+            <div class="section-header" onclick="toggleSection(this)">
+                <div class="section-title">
+                    <div class="section-icon">🦶</div>
+                    Balance & Fall Risk
+                </div>
+                <div class="section-toggle">▼</div>
+            </div>
+            <div class="section-content">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Single Leg Stance</label>
+                        <select class="form-input score-select" id="singleLeg" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">TUG Test</label>
+                        <select class="form-input score-select" id="tug" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Functional Reach</label>
+                        <select class="form-input score-select" id="functionalReach" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Y-Balance</label>
+                        <select class="form-input score-select" id="yBalance" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Neurological Screen -->
+        <div class="section" data-section="neuro">
+            <div class="section-header" onclick="toggleSection(this)">
+                <div class="section-title">
+                    <div class="section-icon">🧠</div>
+                    Neurological Screen
+                </div>
+                <div class="section-toggle">▼</div>
+            </div>
+            <div class="section-content">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">DTRs</label>
+                        <select class="form-input score-select" id="dtrs" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Sensation</label>
+                        <select class="form-input score-select" id="sensation" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Coordination</label>
+                        <select class="form-input score-select" id="coordination" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Cranial Nerves</label>
+                        <select class="form-input score-select" id="cranialNerves" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Flexibility -->
+        <div class="section" data-section="flexibility">
+            <div class="section-header" onclick="toggleSection(this)">
+                <div class="section-title">
+                    <div class="section-icon">🤸</div>
+                    Flexibility
+                </div>
+                <div class="section-toggle">▼</div>
+            </div>
+            <div class="section-content">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Sit & Reach</label>
+                        <select class="form-input score-select" id="sitReach" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Thomas Test</label>
+                        <select class="form-input score-select" id="thomasTest" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Shoulder Mobility</label>
+                        <select class="form-input score-select" id="shoulderMobility" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Ankle DF</label>
+                        <select class="form-input score-select" id="ankleDf" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Strength -->
+        <div class="section" data-section="strength">
+            <div class="section-header" onclick="toggleSection(this)">
+                <div class="section-title">
+                    <div class="section-icon">💪</div>
+                    Strength
+                </div>
+                <div class="section-toggle">▼</div>
+            </div>
+            <div class="section-content">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Grip Strength</label>
+                        <select class="form-input score-select" id="grip" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Sit-to-Stand</label>
+                        <select class="form-input score-select" id="sitToStand" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Push-Up Test</label>
+                        <select class="form-input score-select" id="pushUp" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Core Stability</label>
+                        <select class="form-input score-select" id="core" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Metabolic/Cardio -->
+        <div class="section" data-section="cardio">
+            <div class="section-header" onclick="toggleSection(this)">
+                <div class="section-title">
+                    <div class="section-icon">❤️</div>
+                    Metabolic / Cardio
+                </div>
+                <div class="section-toggle">▼</div>
+            </div>
+            <div class="section-content">
+                <div class="form-group">
+                    <label class="form-label">6MWT or Treadmill</label>
+                    <select class="form-input score-select" id="walkTest" onchange="updateScoreClass(this); calculateGrade()">
+                        <option value="">Select...</option>
+                        <option value="5">Excellent</option>
+                        <option value="4">Good</option>
+                        <option value="3">Average</option>
+                        <option value="2">Needs Work</option>
+                        <option value="1">Concern</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">HR Response</label>
+                        <select class="form-input score-select" id="hrResponse" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Recovery</label>
+                        <select class="form-input score-select" id="recovery" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- FMS -->
+        <div class="section" data-section="fms">
+            <div class="section-header" onclick="toggleSection(this)">
+                <div class="section-title">
+                    <div class="section-icon">📋</div>
+                    Functional Movement Screen
+                </div>
+                <div class="section-toggle">▼</div>
+            </div>
+            <div class="section-content">
+                <div class="fms-test">
+                    <div class="fms-test-name">Deep Squat</div>
+                    <div class="fms-buttons">
+                        <button class="fms-btn" onclick="setFms(this, 'deepSquat', 0)">0</button>
+                        <button class="fms-btn" onclick="setFms(this, 'deepSquat', 1)">1</button>
+                        <button class="fms-btn" onclick="setFms(this, 'deepSquat', 2)">2</button>
+                        <button class="fms-btn" onclick="setFms(this, 'deepSquat', 3)">3</button>
+                    </div>
+                </div>
+                <div class="fms-test">
+                    <div class="fms-test-name">Hurdle Step</div>
+                    <div class="fms-buttons">
+                        <button class="fms-btn" onclick="setFms(this, 'hurdleStep', 0)">0</button>
+                        <button class="fms-btn" onclick="setFms(this, 'hurdleStep', 1)">1</button>
+                        <button class="fms-btn" onclick="setFms(this, 'hurdleStep', 2)">2</button>
+                        <button class="fms-btn" onclick="setFms(this, 'hurdleStep', 3)">3</button>
+                    </div>
+                </div>
+                <div class="fms-test">
+                    <div class="fms-test-name">Inline Lunge</div>
+                    <div class="fms-buttons">
+                        <button class="fms-btn" onclick="setFms(this, 'inlineLunge', 0)">0</button>
+                        <button class="fms-btn" onclick="setFms(this, 'inlineLunge', 1)">1</button>
+                        <button class="fms-btn" onclick="setFms(this, 'inlineLunge', 2)">2</button>
+                        <button class="fms-btn" onclick="setFms(this, 'inlineLunge', 3)">3</button>
+                    </div>
+                </div>
+                <div class="fms-test">
+                    <div class="fms-test-name">Shoulder Mobility</div>
+                    <div class="fms-buttons">
+                        <button class="fms-btn" onclick="setFms(this, 'shoulderMobilityFms', 0)">0</button>
+                        <button class="fms-btn" onclick="setFms(this, 'shoulderMobilityFms', 1)">1</button>
+                        <button class="fms-btn" onclick="setFms(this, 'shoulderMobilityFms', 2)">2</button>
+                        <button class="fms-btn" onclick="setFms(this, 'shoulderMobilityFms', 3)">3</button>
+                    </div>
+                </div>
+                <div class="fms-test">
+                    <div class="fms-test-name">Active Straight Leg Raise</div>
+                    <div class="fms-buttons">
+                        <button class="fms-btn" onclick="setFms(this, 'activeStraightLeg', 0)">0</button>
+                        <button class="fms-btn" onclick="setFms(this, 'activeStraightLeg', 1)">1</button>
+                        <button class="fms-btn" onclick="setFms(this, 'activeStraightLeg', 2)">2</button>
+                        <button class="fms-btn" onclick="setFms(this, 'activeStraightLeg', 3)">3</button>
+                    </div>
+                </div>
+                <div class="fms-test">
+                    <div class="fms-test-name">Trunk Stability Push-Up</div>
+                    <div class="fms-buttons">
+                        <button class="fms-btn" onclick="setFms(this, 'trunkPush', 0)">0</button>
+                        <button class="fms-btn" onclick="setFms(this, 'trunkPush', 1)">1</button>
+                        <button class="fms-btn" onclick="setFms(this, 'trunkPush', 2)">2</button>
+                        <button class="fms-btn" onclick="setFms(this, 'trunkPush', 3)">3</button>
+                    </div>
+                </div>
+                <div class="fms-test">
+                    <div class="fms-test-name">Rotary Stability</div>
+                    <div class="fms-buttons">
+                        <button class="fms-btn" onclick="setFms(this, 'rotaryStability', 0)">0</button>
+                        <button class="fms-btn" onclick="setFms(this, 'rotaryStability', 1)">1</button>
+                        <button class="fms-btn" onclick="setFms(this, 'rotaryStability', 2)">2</button>
+                        <button class="fms-btn" onclick="setFms(this, 'rotaryStability', 3)">3</button>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top: 16px; padding: 12px; background: var(--build-light); border-radius: 8px;">
+                    <label class="form-label">FMS Total Score</label>
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--build-red);" id="fmsTotal">-- / 21</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Gait Analysis -->
+        <div class="section" data-section="gait">
+            <div class="section-header" onclick="toggleSection(this)">
+                <div class="section-title">
+                    <div class="section-icon">🚶</div>
+                    Gait Analysis
+                </div>
+                <div class="section-toggle">▼</div>
+            </div>
+            <div class="section-content">
+                <div class="form-group">
+                    <label class="form-label">Cadence (steps/min)</label>
+                    <input type="number" class="form-input" id="cadence" placeholder="0">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Asymmetry</label>
+                        <select class="form-input score-select" id="asymmetry" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Compensations</label>
+                        <select class="form-input score-select" id="compensations" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Habit Assessment -->
+        <div class="section" data-section="habits">
+            <div class="section-header" onclick="toggleSection(this)">
+                <div class="section-title">
+                    <div class="section-icon">🎯</div>
+                    Habit Assessment
+                </div>
+                <div class="section-toggle">▼</div>
+            </div>
+            <div class="section-content">
+                <div class="habit-slider-container">
+                    <div class="habit-slider-label">
+                        <span class="form-label">Positive Habit %</span>
+                        <span class="habit-slider-value" id="habitValue">50%</span>
+                    </div>
+                    <input type="range" class="habit-slider" id="habitSlider" min="0" max="100" value="50" oninput="updateHabitValue(this.value)">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Identity Gap</label>
+                        <select class="form-input score-select" id="identityGap" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Environment Score</label>
+                        <select class="form-input score-select" id="environmentScore" onchange="updateScoreClass(this); calculateGrade()">
+                            <option value="">Select...</option>
+                            <option value="5">Excellent</option>
+                            <option value="4">Good</option>
+                            <option value="3">Average</option>
+                            <option value="2">Needs Work</option>
+                            <option value="1">Concern</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Priority Action Plan -->
+        <div class="section" data-section="plan">
+            <div class="section-header" onclick="toggleSection(this)">
+                <div class="section-title">
+                    <div class="section-icon">📝</div>
+                    Priority Action Plan
+                </div>
+                <div class="section-toggle">▼</div>
+            </div>
+            <div class="section-content">
+                <div class="form-group">
+                    <label class="form-label">Mobility Focus</label>
+                    <textarea class="priority-textarea" id="mobilityFocus" placeholder="Primary mobility priorities..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Stability Focus</label>
+                    <textarea class="priority-textarea" id="stabilityFocus" placeholder="Primary stability priorities..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Habit Focus</label>
+                    <textarea class="priority-textarea" id="habitFocus" placeholder="Primary habit priorities..."></textarea>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <!-- Action Bar -->
+    <div class="action-bar">
+        <button class="action-btn action-btn-secondary" onclick="loadSampleData()">Load Sample</button>
+        <button class="action-btn action-btn-secondary" onclick="clearForm()">Clear</button>
+        <button class="action-btn action-btn-primary" onclick="exportData()">Export</button>
+    </div>
+    
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+    
+    <script>
+        // FMS scores storage
+        const fmsScores = {
+            deepSquat: null,
+            hurdleStep: null,
+            inlineLunge: null,
+            shoulderMobilityFms: null,
+            activeStraightLeg: null,
+            trunkPush: null,
+            rotaryStability: null
+        };
+        
+        // Set today's date
+        document.getElementById('assessmentDate').value = new Date().toISOString().split('T')[0];
+        
+        // Toggle section
+        function toggleSection(header) {
+            const section = header.closest('.section');
+            section.classList.toggle('expanded');
+        }
+        
+        // Update score select class
+        function updateScoreClass(select) {
+            select.classList.remove('excellent', 'good', 'average', 'needs-work', 'concern');
+            const val = parseInt(select.value);
+            if (val === 5) select.classList.add('excellent');
+            else if (val === 4) select.classList.add('good');
+            else if (val === 3) select.classList.add('average');
+            else if (val === 2) select.classList.add('needs-work');
+            else if (val === 1) select.classList.add('concern');
+        }
+        
+        // Set FMS score
+        function setFms(btn, test, score) {
+            fmsScores[test] = score;
+            
+            // Update button styles
+            const buttons = btn.parentElement.querySelectorAll('.fms-btn');
+            buttons.forEach(b => b.className = 'fms-btn');
+            btn.classList.add('selected-' + score);
+            
+            // Update total
+            updateFmsTotal();
+            calculateGrade();
+        }
+        
+        // Update FMS total
+        function updateFmsTotal() {
+            const scores = Object.values(fmsScores).filter(s => s !== null);
+            if (scores.length === 0) {
+                document.getElementById('fmsTotal').textContent = '-- / 21';
+            } else {
+                const total = scores.reduce((a, b) => a + b, 0);
+                document.getElementById('fmsTotal').textContent = total + ' / 21';
+            }
+        }
+        
+        // Update habit slider value
+        function updateHabitValue(val) {
+            document.getElementById('habitValue').textContent = val + '%';
+            calculateGrade();
+        }
+        
+        // Calculate overall grade
+        function calculateGrade() {
+            const scoreSelects = document.querySelectorAll('.score-select');
+            let total = 0;
+            let count = 0;
+            
+            scoreSelects.forEach(select => {
+                if (select.value) {
+                    total += parseInt(select.value);
+                    count++;
+                }
+            });
+            
+            // Add FMS contribution (scaled to 5-point)
+            const fmsValues = Object.values(fmsScores).filter(s => s !== null);
+            if (fmsValues.length > 0) {
+                const fmsAvg = fmsValues.reduce((a, b) => a + b, 0) / fmsValues.length;
+                const fmsScaled = (fmsAvg / 3) * 5;
+                total += fmsScaled;
+                count++;
+            }
+            
+            // Add habit percentage (scaled to 5-point)
+            const habitPct = parseInt(document.getElementById('habitSlider').value);
+            const habitScaled = (habitPct / 100) * 5;
+            total += habitScaled;
+            count++;
+            
+            if (count === 0) {
+                document.getElementById('overallGrade').textContent = 'Grade: --';
+                return;
+            }
+            
+            const avg = total / count;
+            let grade = 'F';
+            if (avg >= 4.5) grade = 'A';
+            else if (avg >= 4) grade = 'A-';
+            else if (avg >= 3.7) grade = 'B+';
+            else if (avg >= 3.3) grade = 'B';
+            else if (avg >= 3) grade = 'B-';
+            else if (avg >= 2.7) grade = 'C+';
+            else if (avg >= 2.3) grade = 'C';
+            else if (avg >= 2) grade = 'C-';
+            else if (avg >= 1.7) grade = 'D+';
+            else if (avg >= 1.3) grade = 'D';
+            else grade = 'F';
+            
+            document.getElementById('overallGrade').textContent = 'Grade: ' + grade;
+        }
+        
+        // Show toast
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2000);
+        }
+        
+        // Load sample data
+        function loadSampleData() {
+            document.getElementById('patientName').value = 'John Smith';
+            document.getElementById('patientDob').value = '1970-03-15';
+            document.getElementById('assessor').value = 'Larry Meyer';
+            
+            const sampleScores = {
+                bodyFat: 4, muscleMass: 3, visceralFat: 4, phaseAngle: 3,
+                singleLeg: 3, tug: 4, functionalReach: 3, yBalance: 3,
+                dtrs: 5, sensation: 5, coordination: 4, cranialNerves: 5,
+                sitReach: 2, thomasTest: 3, shoulderMobility: 3, ankleDf: 2,
+                grip: 4, sitToStand: 4, pushUp: 3, core: 3,
+                walkTest: 4, hrResponse: 3, recovery: 3,
+                asymmetry: 3, compensations: 3,
+                identityGap: 3, environmentScore: 4
+            };
+            
+            Object.keys(sampleScores).forEach(key => {
+                const el = document.getElementById(key);
+                if (el) {
+                    el.value = sampleScores[key];
+                    updateScoreClass(el);
+                }
+            });
+            
+            // Sample FMS
+            const fmsSample = { deepSquat: 2, hurdleStep: 2, inlineLunge: 2, shoulderMobilityFms: 2, activeStraightLeg: 2, trunkPush: 2, rotaryStability: 2 };
+            Object.keys(fmsSample).forEach(test => {
+                fmsScores[test] = fmsSample[test];
+            });
+            
+            // Update FMS button displays
+            document.querySelectorAll('.fms-test').forEach((testDiv, index) => {
+                const testNames = ['deepSquat', 'hurdleStep', 'inlineLunge', 'shoulderMobilityFms', 'activeStraightLeg', 'trunkPush', 'rotaryStability'];
+                const score = fmsScores[testNames[index]];
+                if (score !== null) {
+                    const buttons = testDiv.querySelectorAll('.fms-btn');
+                    buttons.forEach(b => b.className = 'fms-btn');
+                    buttons[score].classList.add('selected-' + score);
+                }
+            });
+            
+            updateFmsTotal();
+            
+            document.getElementById('habitSlider').value = 65;
+            updateHabitValue(65);
+            
+            document.getElementById('cadence').value = 112;
+            document.getElementById('mobilityFocus').value = 'Hip flexor mobility, ankle dorsiflexion';
+            document.getElementById('stabilityFocus').value = 'Core anti-rotation, single-leg stability';
+            document.getElementById('habitFocus').value = 'Morning movement routine, sleep hygiene';
+            
+            calculateGrade();
+            showToast('Sample data loaded');
+        }
+        
+        // Clear form
+        function clearForm() {
+            if (!confirm('Clear all data?')) return;
+            
+            document.querySelectorAll('.form-input').forEach(el => {
+                if (el.type === 'date' && el.id === 'assessmentDate') {
+                    el.value = new Date().toISOString().split('T')[0];
+                } else {
+                    el.value = '';
+                }
+                el.classList.remove('excellent', 'good', 'average', 'needs-work', 'concern');
+            });
+            
+            document.querySelectorAll('.priority-textarea').forEach(el => el.value = '');
+            
+            Object.keys(fmsScores).forEach(key => fmsScores[key] = null);
+            document.querySelectorAll('.fms-btn').forEach(btn => btn.className = 'fms-btn');
+            updateFmsTotal();
+            
+            document.getElementById('habitSlider').value = 50;
+            updateHabitValue(50);
+            
+            document.getElementById('overallGrade').textContent = 'Grade: --';
+            showToast('Form cleared');
+        }
+        
+        // Export data
+        function exportData() {
+            const data = {
+                patient: {
+                    name: document.getElementById('patientName').value,
+                    dob: document.getElementById('patientDob').value,
+                    assessmentDate: document.getElementById('assessmentDate').value,
+                    assessor: document.getElementById('assessor').value
+                },
+                overallGrade: document.getElementById('overallGrade').textContent,
+                bodyComposition: {
+                    weight: document.getElementById('weight').value,
+                    bodyFat: getScoreLabel(document.getElementById('bodyFat').value),
+                    muscleMass: getScoreLabel(document.getElementById('muscleMass').value),
+                    visceralFat: getScoreLabel(document.getElementById('visceralFat').value),
+                    phaseAngle: getScoreLabel(document.getElementById('phaseAngle').value)
+                },
+                balance: {
+                    singleLeg: getScoreLabel(document.getElementById('singleLeg').value),
+                    tug: getScoreLabel(document.getElementById('tug').value),
+                    functionalReach: getScoreLabel(document.getElementById('functionalReach').value),
+                    yBalance: getScoreLabel(document.getElementById('yBalance').value)
+                },
+                neuro: {
+                    dtrs: getScoreLabel(document.getElementById('dtrs').value),
+                    sensation: getScoreLabel(document.getElementById('sensation').value),
+                    coordination: getScoreLabel(document.getElementById('coordination').value),
+                    cranialNerves: getScoreLabel(document.getElementById('cranialNerves').value)
+                },
+                flexibility: {
+                    sitReach: getScoreLabel(document.getElementById('sitReach').value),
+                    thomasTest: getScoreLabel(document.getElementById('thomasTest').value),
+                    shoulderMobility: getScoreLabel(document.getElementById('shoulderMobility').value),
+                    ankleDf: getScoreLabel(document.getElementById('ankleDf').value)
+                },
+                strength: {
+                    grip: getScoreLabel(document.getElementById('grip').value),
+                    sitToStand: getScoreLabel(document.getElementById('sitToStand').value),
+                    pushUp: getScoreLabel(document.getElementById('pushUp').value),
+                    core: getScoreLabel(document.getElementById('core').value)
+                },
+                cardio: {
+                    walkTest: getScoreLabel(document.getElementById('walkTest').value),
+                    hrResponse: getScoreLabel(document.getElementById('hrResponse').value),
+                    recovery: getScoreLabel(document.getElementById('recovery').value)
+                },
+                fms: {
+                    scores: { ...fmsScores },
+                    total: document.getElementById('fmsTotal').textContent
+                },
+                gait: {
+                    cadence: document.getElementById('cadence').value,
+                    asymmetry: getScoreLabel(document.getElementById('asymmetry').value),
+                    compensations: getScoreLabel(document.getElementById('compensations').value)
+                },
+                habits: {
+                    positiveHabitPct: document.getElementById('habitSlider').value + '%',
+                    identityGap: getScoreLabel(document.getElementById('identityGap').value),
+                    environmentScore: getScoreLabel(document.getElementById('environmentScore').value)
+                },
+                priorityPlan: {
+                    mobility: document.getElementById('mobilityFocus').value,
+                    stability: document.getElementById('stabilityFocus').value,
+                    habit: document.getElementById('habitFocus').value
+                }
+            };
+            
+            const json = JSON.stringify(data, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `BUILD_Assessment_${data.patient.name.replace(/\s+/g, '_') || 'Patient'}_${data.patient.assessmentDate || 'undated'}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Assessment exported');
+        }
+        
+        function getScoreLabel(val) {
+            const labels = { '5': 'Excellent', '4': 'Good', '3': 'Average', '2': 'Needs Work', '1': 'Concern' };
+            return labels[val] || '';
+        }
+    </script>
+</body>
+</html>

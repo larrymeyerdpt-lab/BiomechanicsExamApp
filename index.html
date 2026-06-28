@@ -123,6 +123,8 @@ const {
 const THRESHOLDS = {
   hip_flex: 110,
   // Degrees
+  slr: 62,
+  // Degrees — Straight Leg Raise norm
   hip_ir: 30,
   // Degrees
   hip_er: 40,
@@ -794,6 +796,96 @@ const DualBinaryRow = ({
     className: "md:w-3/4 flex items-center gap-4"
   }, renderSide('R'), renderSide('L')));
 };
+// DeficitRow — R/L test where the result is either WFL or a graded deficit (Mild/Mod/Sig).
+// Storage: baseName_R / baseName_L = 'WFL'|'Mild'|'Mod'|'Sig'|''
+// When wflLocked AND no value, shows the "WFL" pill in green to indicate the
+// section's WFL toggle has covered this test.  Mild=amber, Mod=orange, Sig=red.
+const DeficitRow = ({
+  label,
+  baseName,
+  data,
+  onChange,
+  wflLocked = false
+}) => {
+  const sevColorFor = (s, isSel) => {
+    if (!isSel) return 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50';
+    if (s === 'WFL')  return 'bg-green-50 text-green-700 border-green-400 font-bold';
+    if (s === 'Mild') return 'bg-amber-50 text-amber-700 border-amber-400 font-bold';
+    if (s === 'Mod')  return 'bg-orange-50 text-orange-700 border-orange-400 font-bold';
+    if (s === 'Sig')  return 'bg-red-50 text-red-700 border-red-400 font-bold';
+    return '';
+  };
+  const renderSide = side => {
+    const stored = data[`${baseName}_${side}`] || '';
+    const showWflBadge = wflLocked && !stored;
+    return /*#__PURE__*/React.createElement("div", {
+      className: side === 'R' ? "flex-1 flex items-center gap-1 flex-wrap border-r border-gray-100 pr-2" : "flex-1 flex items-center gap-1 flex-wrap"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "text-xs text-gray-400 font-mono mr-1"
+    }, side + ":"),
+    ['WFL', 'Mild', 'Mod', 'Sig'].map(opt => /*#__PURE__*/React.createElement("button", {
+      key: opt,
+      type: "button",
+      onClick: () => onChange(`${baseName}_${side}`, stored === opt ? '' : opt),
+      className: `text-[10px] px-1.5 py-0.5 border rounded cursor-pointer ${sevColorFor(opt, stored === opt)}`
+    }, opt)),
+    showWflBadge && /*#__PURE__*/React.createElement("span", {
+      className: "ml-1 px-2 py-0.5 bg-green-50 text-green-700 border border-green-400 text-[10px] font-bold rounded-full"
+    }, "WFL"));
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "mb-3 flex flex-col md:flex-row gap-2 items-start md:items-center border-b border-gray-100 pb-2 md:pb-0 md:border-0"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "md:w-1/3"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "text-sm font-medium text-gray-700"
+  }, label)), /*#__PURE__*/React.createElement("div", {
+    className: "md:w-2/3 flex items-center gap-4 flex-wrap"
+  }, renderSide('R'), renderSide('L')));
+};
+
+// DualSingleROM — R/L single-value ROM (no AROM/PROM split).  For tests like
+// Hamstring 90-90, SLR, and DF Knee to Wall where one number per side suffices.
+// Storage: baseName_R / baseName_L (numeric string).
+const DualSingleROM = ({
+  label,
+  baseName,
+  data,
+  onChange,
+  norm,
+  wflLocked = false
+}) => {
+  const renderSide = side => {
+    const stored = data[`${baseName}_${side}`] || '';
+    const showWflDefault = wflLocked && !stored;
+    const tintCls = showWflDefault
+      ? "border-green-400 text-green-700 bg-green-50 placeholder:text-green-600"
+      : "border-gray-300 placeholder:text-gray-400";
+    return /*#__PURE__*/React.createElement("div", {
+      className: side === 'R' ? "flex-1 flex items-center gap-1 border-r border-gray-100 pr-2" : "flex-1 flex items-center gap-1"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "text-xs text-gray-400 font-mono mr-1"
+    }, side + ":"),
+    /*#__PURE__*/React.createElement("input", {
+      type: "text",
+      value: stored,
+      onChange: e => onChange(`${baseName}_${side}`, e.target.value),
+      placeholder: showWflDefault ? "WFL" : "deg",
+      className: `w-20 p-1 text-sm border rounded text-center ${tintCls}`
+    }));
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "mb-2 grid grid-cols-12 gap-2 items-center pb-1 border-b border-gray-100"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "col-span-5"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-sm font-medium text-gray-700"
+  }, label), norm && /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] text-gray-400 ml-2"
+  }, norm)), /*#__PURE__*/React.createElement("div", {
+    className: "col-span-7 flex items-center gap-3"
+  }, renderSide('R'), renderSide('L')));
+};
 const DualMobilityRow = ({
   label,
   baseName,
@@ -879,6 +971,69 @@ const ForefootRow = ({
     checked: severity === sev,
     onChange: () => onChange(severityKey, sev)
   }), sev))));
+};
+const SIQuadrupedRow = ({
+  side,
+  data,
+  onChange
+}) => {
+  const orientationKey = `pelvis_si_quad_${side}_orientation`;
+  const severityKey = `pelvis_si_quad_${side}_severity`;
+  const painKey = `pelvis_si_quad_${side}_pain`;
+  const orientation = data[orientationKey];
+  const severity = data[severityKey];
+  const pain = data[painKey];
+  const isRestriction = orientation === 'Posterior' || orientation === 'Anterior';
+  const orientOptions = [
+    { value: 'Mobile', label: 'Mobile' },
+    { value: 'Posterior', label: 'Posterior innominate rotation restriction' },
+    { value: 'Anterior', label: 'Anterior rotation restriction' }
+  ];
+  return /*#__PURE__*/React.createElement("div", {
+    className: "mb-4 bg-gray-50 p-2 rounded border border-gray-100"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-start gap-2 mb-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "font-bold text-sm text-gray-700 w-16 uppercase tracking-wide pt-1"
+  }, side), /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-1 flex-wrap"
+  }, orientOptions.map(opt => /*#__PURE__*/React.createElement("label", {
+    key: opt.value,
+    className: `flex items-center justify-center text-xs cursor-pointer px-3 py-1 border rounded transition-colors select-none ${orientation === opt.value ? (opt.value === 'Mobile' ? 'bg-green-50 border-green-500 text-green-700 font-medium' : 'bg-blue-600 border-blue-600 text-white font-medium shadow-sm') : 'bg-white border-gray-300 text-gray-600 hover:border-blue-300'}`
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "radio",
+    className: "hidden",
+    checked: orientation === opt.value,
+    onChange: () => onChange(orientationKey, opt.value)
+  }), opt.label)))),
+  // Severity row — only shown for restriction orientations
+  isRestriction && /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2 ml-16 pl-2 border-l-2 border-blue-200 mb-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-xs text-blue-800 font-semibold mr-1"
+  }, "Severity:"), ['Mild', 'Mod', 'Sig'].map(sev => /*#__PURE__*/React.createElement("label", {
+    key: sev,
+    className: `flex items-center justify-center text-[10px] uppercase cursor-pointer px-2 py-1 border rounded transition-colors select-none ${severity === sev ? (sev === 'Mild' ? 'bg-amber-100 text-amber-800 border-amber-400 font-bold' : sev === 'Mod' ? 'bg-orange-100 text-orange-800 border-orange-400 font-bold' : 'bg-red-100 text-red-800 border-red-400 font-bold') : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "radio",
+    className: "hidden",
+    checked: severity === sev,
+    onChange: () => onChange(severityKey, sev)
+  }), sev))),
+  // Pain row — shown whenever an orientation is selected
+  orientation && /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2 ml-16 pl-2 border-l-2 border-blue-200"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-xs text-blue-800 font-semibold mr-1"
+  }, "Pain:"), ['None', 'Mild', 'Mod', 'Sig'].map(p => /*#__PURE__*/React.createElement("label", {
+    key: p,
+    className: `flex items-center justify-center text-[10px] uppercase cursor-pointer px-2 py-1 border rounded transition-colors select-none ${pain === p ? (p === 'None' ? 'bg-green-50 text-green-700 border-green-400 font-bold' : p === 'Mild' ? 'bg-amber-100 text-amber-800 border-amber-400 font-bold' : p === 'Mod' ? 'bg-orange-100 text-orange-800 border-orange-400 font-bold' : 'bg-red-100 text-red-800 border-red-400 font-bold') : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "radio",
+    className: "hidden",
+    checked: pain === p,
+    onChange: () => onChange(painKey, p)
+  }), p))));
 };
 const ToeTouchRow = ({
   label,
@@ -1568,6 +1723,45 @@ const ReadOnlyForefoot = ({
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-500 text-xs mr-1"
   }, "L:"), sideChip(lOri, lSev))));
+};
+// ReadOnlySIQuadruped — print rendering of one side's SI Mobility in Quadruped test.
+// Renders the orientation (Mobile = plain green, restrictions get severity-graded chip)
+// plus a pain chip when pain is something other than None.
+const ReadOnlySIQuadruped = ({
+  side,
+  orientation,
+  severity,
+  pain
+}) => {
+  if (!orientation) return null;
+  // Build orientation chip
+  let orientChip;
+  if (orientation === 'Mobile') {
+    orientChip = /*#__PURE__*/React.createElement("span", {
+      className: "inline-block px-1.5 py-0.5 rounded text-xs font-medium text-green-700"
+    }, "Mobile");
+  } else {
+    const sevCls = severity === 'Sig' ? 'sig' : severity === 'Mod' ? 'mod' : 'mild';
+    const fullLabel = (orientation === 'Posterior'
+      ? 'Posterior innominate rotation restriction'
+      : 'Anterior rotation restriction') + (severity ? ` (${severity})` : '');
+    orientChip = /*#__PURE__*/React.createElement("span", {
+      className: 'inline-block px-1.5 py-0.5 rounded text-xs font-medium ' + tintClassFor(sevCls)
+    }, fullLabel);
+  }
+  // Pain chip — only render if pain is set and not None
+  let painChip = null;
+  if (pain && pain !== 'None') {
+    const painCls = pain === 'Sig' ? 'sig' : pain === 'Mod' ? 'mod' : 'mild';
+    painChip = /*#__PURE__*/React.createElement("span", {
+      className: 'inline-block px-1.5 py-0.5 rounded text-xs font-medium ml-2 ' + tintClassFor(painCls)
+    }, `Pain: ${pain}`);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "mb-2 flex items-center gap-2 text-sm break-inside-avoid"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "font-semibold text-gray-700 text-xs uppercase w-12"
+  }, side + ":"), orientChip, painChip);
 };
 const ReadOnlyMobility = ({
   label,
@@ -2816,6 +3010,85 @@ const FINDING_RULES = {
       { label: 'Pathological Reflexes', rule: 'binary', category: 'Reflexes',
         fields: [{ base: 'dtr_babinski', name: 'Babinski' }]}
     ]
+  },
+  // ====================================================================
+  // KNEE EXAM
+  // ====================================================================
+  knee: {
+    label: 'Knee Exam',
+    subsections: [
+      // MMT / Strength
+      { label: 'Knee MMT / Strength', wflKey: 'knee_mmt', rule: 'strength', category: 'Strength',
+        fields: [
+          { base: 'knee_str_hip_flex', name: 'Hip Flexion', level: 'L2' },
+          { base: 'knee_str_knee_ext', name: 'Knee Extension', level: 'L3' },
+          { base: 'knee_str_knee_flex', name: 'Knee Flexion' },
+          { base: 'knee_str_ankle_df', name: 'Ankle DF', level: 'L4' },
+          { base: 'knee_str_ankle_pf', name: 'Ankle PF', level: 'S1' },
+          { base: 'knee_str_hip_abd', name: 'Hip Abduction' },
+          { base: 'knee_str_hip_ext', name: 'Hip Extension' },
+          { base: 'knee_str_ankle_inv', name: 'Ankle Inversion' },
+          { base: 'knee_str_ankle_ev', name: 'Ankle Eversion' },
+          { base: 'knee_str_great_toe_ext', name: 'Great Toe Extension', level: 'L5' }
+        ]},
+      // Balance Tests — uses the deficit_grade rule which treats any non-WFL value as abnormal.
+      { label: 'Balance Tests', wflKey: 'knee_balance', rule: 'deficit_grade', category: 'Balance',
+        fields: [
+          { base: 'knee_bal_sl_balance', name: 'Single-Leg Balance' },
+          { base: 'knee_bal_sl_squat', name: 'Single-Leg Squat' }
+        ]},
+      // Single-side balance tests (Romberg, Sharpened R/L, Sharpened L/R) — single column
+      { label: 'Balance Tests (Single)', wflKey: 'knee_balance', rule: 'deficit_grade_single', category: 'Balance',
+        fields: [
+          { base: 'knee_bal_romberg', name: 'Romberg' },
+          { base: 'knee_bal_sharpened_RL', name: 'Sharpened Romberg (R/L)' },
+          { base: 'knee_bal_sharpened_LR', name: 'Sharpened Romberg (L/R)' }
+        ]},
+      // Special Tests — Pos/Neg, R/L
+      { label: 'Knee Special Tests', wflKey: 'knee_special', rule: 'binary', category: 'Special Tests',
+        fields: [
+          { base: 'knee_sp_thomas', name: 'Thomas Test' },
+          { base: 'knee_sp_ober', name: 'Ober Test' },
+          { base: 'knee_sp_valgus_varus_0', name: 'Valgus/Varus at 0°' },
+          { base: 'knee_sp_valgus_varus_30', name: 'Valgus/Varus at 30°' },
+          { base: 'knee_sp_anterior_drawer', name: 'Anterior Drawer' },
+          { base: 'knee_sp_lachmans', name: "Lachman's" },
+          { base: 'knee_sp_posterior_drawer', name: 'Posterior Drawer' },
+          { base: 'knee_sp_thessalys', name: "Thessaly's" },
+          { base: 'knee_sp_apley', name: 'Apley Compression/Distraction' },
+          { base: 'knee_sp_patellar_grind', name: 'Patellar Grind' }
+        ]},
+      // ROM with AROM/PROM split
+      { label: 'Knee Range of Motion', wflKey: 'knee_rom', rule: 'rom_degrees', category: 'Range of Motion',
+        fields: [
+          { base: 'knee_rom_knee_ext', name: 'Knee Extension', norm: '(0°)' },
+          { base: 'knee_rom_knee_flex', name: 'Knee Flexion', norm: '(0-150°)' },
+          { base: 'knee_rom_df', name: 'Dorsiflexion', norm: '(0-20°)' },
+          { base: 'knee_rom_pf', name: 'Plantarflexion', norm: '(0-50°)' },
+          { base: 'knee_rom_hip_er', name: 'Hip ER', norm: '(45°)' },
+          { base: 'knee_rom_hip_ir', name: 'Hip IR', norm: '(45°)' },
+          { base: 'knee_rom_hip_abd', name: 'Hip Abduction', norm: '(45°)' },
+          { base: 'knee_rom_hip_add', name: 'Hip Adduction', norm: '(30°)' },
+          { base: 'knee_rom_mtp', name: '1st MTP Extension', norm: '(0-70°)' }
+        ]},
+      // Single-value ROM (R/L)
+      { label: 'Knee ROM (Single)', wflKey: 'knee_rom', rule: 'rom_degrees_single', category: 'Range of Motion',
+        fields: [
+          { base: 'knee_rom_hip_flex_prom', name: 'Hip Flexion (PROM)', norm: '(120°)' },
+          { base: 'knee_rom_ham_90', name: 'Hamstring 90-90', norm: '(155°)' },
+          { base: 'knee_rom_slr', name: 'SLR', norm: '(62°)' },
+          { base: 'knee_rom_df_kw', name: 'DF Knee to Wall' }
+        ]},
+      // Reflexes
+      { label: 'Knee Reflexes', rule: 'dtr', category: 'Reflexes',
+        fields: [
+          { base: 'knee_dtr_patella', name: 'Patella', level: 'L4' },
+          { base: 'knee_dtr_achilles', name: 'Achilles', level: 'S1' }
+        ]},
+      // Babinski (binary)
+      { label: 'Pathological Reflexes', rule: 'binary', category: 'Reflexes',
+        fields: [{ base: 'knee_dtr_babinski', name: 'Babinski' }]}
+    ]
   }
 };
 
@@ -2931,6 +3204,39 @@ function findAbnormalFindings(formData, examKey) {
             kind: 'dtr', keep: true
           });
         }
+      } else if (sub.rule === 'deficit_grade') {
+        // R/L deficit grade (WFL/Mild/Mod/Sig).  Anything non-WFL is abnormal.
+        for (const side of ['R', 'L']) {
+          const val = formData[`${f.base}_${side}`];
+          if (!val || val === 'WFL') continue;
+          candidates.push({
+            category: sub.category, subsection: sub.label,
+            label: f.name, side, value: val + ' deficit',
+            kind: 'restriction', keep: true
+          });
+        }
+      } else if (sub.rule === 'deficit_grade_single') {
+        // Single-side deficit grade (no R/L, e.g. Romberg)
+        const val = formData[f.base];
+        if (!val || val === 'WFL') continue;
+        candidates.push({
+          category: sub.category, subsection: sub.label,
+          label: f.name, side: null, value: val + ' deficit',
+          kind: 'restriction', keep: true
+        });
+      } else if (sub.rule === 'rom_degrees_single') {
+        // R/L single-value ROM (no AROM/PROM split).  Compare to norm threshold.
+        for (const side of ['R', 'L']) {
+          const val = formData[`${f.base}_${side}`];
+          if (isRomDeviation(val, f.norm)) {
+            candidates.push({
+              category: sub.category, subsection: sub.label,
+              label: f.name, side,
+              value: val + '°', norm: f.norm,
+              kind: 'rom_degree', keep: true
+            });
+          }
+        }
       }
     }
 
@@ -3038,7 +3344,8 @@ function hasAnyRegionalData(formData, examKey) {
       // Check all possible field keys for this row
       const candidates = [];
       if (sub.rule === 'strength' || sub.rule === 'rom_restriction' ||
-          sub.rule === 'binary' || sub.rule === 'dtr') {
+          sub.rule === 'binary' || sub.rule === 'dtr' ||
+          sub.rule === 'deficit_grade' || sub.rule === 'rom_degrees_single') {
         candidates.push(`${f.base}_R`, `${f.base}_L`);
       } else if (sub.rule === 'rom_degrees') {
         if (f.singleCol) {
@@ -3049,7 +3356,7 @@ function hasAnyRegionalData(formData, examKey) {
         }
       } else if (sub.rule === 'special_severity') {
         candidates.push(`${f.base}_R`, `${f.base}_L`);
-      } else if (sub.rule === 'special_severity_single') {
+      } else if (sub.rule === 'special_severity_single' || sub.rule === 'deficit_grade_single') {
         candidates.push(f.base);
       }
       for (const k of candidates) {
@@ -3063,6 +3370,24 @@ function hasAnyRegionalData(formData, examKey) {
   if (examKey === 'cervical') {
     for (const k of ['cerv_final_notes', 'sp_notes']) {
       if (formData[k] && String(formData[k]).trim()) return true;
+    }
+  }
+  if (examKey === 'knee') {
+    // Knee has palpation notes, balance notes, special notes, joint mobility,
+    // sensation R/L, gait observations, postural pill groups, and "other" notes.
+    for (const k of ['knee_palpation_notes', 'knee_balance_notes', 'knee_special_notes',
+                     'knee_rom_joint_mobility_notes', 'knee_sensation_R', 'knee_sensation_L',
+                     'knee_other_notes', 'knee_gait_other',
+                     'knee_gait_ic_ankle','knee_gait_ic_knee','knee_gait_ic_hip','knee_gait_ic_pelvis',
+                     'knee_gait_sls_ankle','knee_gait_sls_knee','knee_gait_sls_hip','knee_gait_sls_pelvis',
+                     'knee_gait_sla_ankle','knee_gait_sla_knee','knee_gait_sla_hip','knee_gait_sla_pelvis']) {
+      if (formData[k] && String(formData[k]).trim()) return true;
+    }
+    for (const k of ['knee_postural_thoracic_kyphosis', 'knee_postural_lumbar_lordosis',
+                     'knee_postural_pelvic_tilt', 'knee_postural_calcaneus',
+                     'knee_postural_R_knee', 'knee_postural_L_knee']) {
+      const v = formData[k];
+      if (Array.isArray(v) && v.length > 0) return true;
     }
   }
   return false;
@@ -3281,6 +3606,42 @@ function renderPrintSubsection(sub, formData) {
           key: f.base, label: f.name, rVal: 'WFL', singleCol: true
         }));
       }
+    } else if (sub.rule === 'deficit_grade') {
+      // R/L deficit grade (WFL/Mild/Mod/Sig).  Treat WFL like the section-WFL fill.
+      const rRaw = formData[`${f.base}_R`];
+      const lRaw = formData[`${f.base}_L`];
+      const r = hasVal(rRaw) ? rRaw : wflFill;
+      const l = hasVal(lRaw) ? lRaw : wflFill;
+      if (!hasVal(r) && !hasVal(l)) continue;
+      rows.push(/*#__PURE__*/React.createElement(PrintRow, {
+        key: f.base, label: f.name, rVal: r, lVal: l
+      }));
+    } else if (sub.rule === 'deficit_grade_single') {
+      // Single-side deficit grade (Romberg, Sharpened R/L, Sharpened L/R)
+      const v = formData[f.base];
+      if (hasVal(v)) {
+        rows.push(/*#__PURE__*/React.createElement(PrintRow, {
+          key: f.base, label: f.name, rVal: v, singleCol: true
+        }));
+      } else if (isSectionWFL) {
+        rows.push(/*#__PURE__*/React.createElement(PrintRow, {
+          key: f.base, label: f.name, rVal: 'WFL', singleCol: true
+        }));
+      }
+    } else if (sub.rule === 'rom_degrees_single') {
+      // R/L single-value ROM (Hamstring 90-90, SLR, DF Knee to Wall)
+      const rRaw = formData[`${f.base}_R`];
+      const lRaw = formData[`${f.base}_L`];
+      const rVal = hasVal(rRaw) ? rRaw + '°' : (isSectionWFL ? 'WFL' : '');
+      const lVal = hasVal(lRaw) ? lRaw + '°' : (isSectionWFL ? 'WFL' : '');
+      if (!hasVal(rVal) && !hasVal(lVal)) continue;
+      const rHint = isRomDeviation(rRaw, f.norm) ? 'rom_deviation' : null;
+      const lHint = isRomDeviation(lRaw, f.norm) ? 'rom_deviation' : null;
+      rows.push(/*#__PURE__*/React.createElement(PrintRow, {
+        key: f.base, label: f.name, norm: f.norm,
+        rVal: rVal, lVal: lVal,
+        rClassHint: rHint, lClassHint: lHint
+      }));
     }
   }
 
@@ -3317,6 +3678,122 @@ function examOpenerSentence(formData, examLabel) {
 
 // The full read-only regional-exam block for print. Returns null if the
 // exam has no data at all.
+// Knee-specific custom print blocks for content not covered by FINDING_RULES:
+// gait observations grid, postural analysis pill values, palpation notes,
+// balance/special/joint-mobility/other notes, sensation R/L.
+function renderKneeExtras(formData, position) {
+  // position = 'top' (gait, posture, palpation) or 'bottom' (notes & sensation)
+  if (position === 'top') {
+    const blocks = [];
+
+    // Gait grid — only render if any cell has data
+    const gaitCells = [
+      formData.knee_gait_ic_ankle, formData.knee_gait_ic_knee, formData.knee_gait_ic_hip, formData.knee_gait_ic_pelvis,
+      formData.knee_gait_sls_ankle, formData.knee_gait_sls_knee, formData.knee_gait_sls_hip, formData.knee_gait_sls_pelvis,
+      formData.knee_gait_sla_ankle, formData.knee_gait_sla_knee, formData.knee_gait_sla_hip, formData.knee_gait_sla_pelvis,
+      formData.knee_gait_other
+    ];
+    if (gaitCells.some(v => v && String(v).trim())) {
+      blocks.push(/*#__PURE__*/React.createElement("div", { key: "gait", className: "mb-4 break-inside-avoid" },
+        /*#__PURE__*/React.createElement("div", { className: "text-xs font-bold text-blue-800 uppercase tracking-wider mb-1 border-b border-blue-100 pb-1" }, "Gait Observation"),
+        /*#__PURE__*/React.createElement("div", { className: "grid grid-cols-5 gap-1 text-xs mt-2" },
+          /*#__PURE__*/React.createElement("div", { className: "font-bold text-gray-500" }, ""),
+          /*#__PURE__*/React.createElement("div", { className: "font-bold text-gray-500 text-center" }, "Ankle"),
+          /*#__PURE__*/React.createElement("div", { className: "font-bold text-gray-500 text-center" }, "Knee"),
+          /*#__PURE__*/React.createElement("div", { className: "font-bold text-gray-500 text-center" }, "Hip"),
+          /*#__PURE__*/React.createElement("div", { className: "font-bold text-gray-500 text-center" }, "Pelvis / Trunk"),
+          ...['ic', 'sls', 'sla'].flatMap(phase => {
+            const phaseLabel = phase.toUpperCase();
+            return [
+              /*#__PURE__*/React.createElement("div", { key: phase + "_lbl", className: "font-semibold text-gray-700" }, phaseLabel),
+              /*#__PURE__*/React.createElement("div", { key: phase + "_a", className: "text-gray-800" }, formData[`knee_gait_${phase}_ankle`] || "—"),
+              /*#__PURE__*/React.createElement("div", { key: phase + "_k", className: "text-gray-800" }, formData[`knee_gait_${phase}_knee`] || "—"),
+              /*#__PURE__*/React.createElement("div", { key: phase + "_h", className: "text-gray-800" }, formData[`knee_gait_${phase}_hip`] || "—"),
+              /*#__PURE__*/React.createElement("div", { key: phase + "_p", className: "text-gray-800" }, formData[`knee_gait_${phase}_pelvis`] || "—")
+            ];
+          })
+        ),
+        formData.knee_gait_other && /*#__PURE__*/React.createElement("div", { className: "mt-2 text-xs" },
+          /*#__PURE__*/React.createElement("span", { className: "font-semibold text-gray-600" }, "Other: "),
+          /*#__PURE__*/React.createElement("span", { className: "text-gray-700" }, formData.knee_gait_other))
+      ));
+    }
+
+    // Postural Analysis — render any non-Neutral selections
+    const posturalFields = [
+      ['knee_postural_thoracic_kyphosis', 'Thoracic Kyphosis'],
+      ['knee_postural_lumbar_lordosis', 'Lumbar Lordosis'],
+      ['knee_postural_pelvic_tilt', 'Pelvic Tilt'],
+      ['knee_postural_calcaneus', 'Calcaneus'],
+      ['knee_postural_R_knee', 'R Knee'],
+      ['knee_postural_L_knee', 'L Knee']
+    ];
+    const posturalRows = [];
+    for (const [field, label] of posturalFields) {
+      const arr = formData[field];
+      if (Array.isArray(arr) && arr.length > 0) {
+        const val = arr[0];
+        const isNormal = ['Neutral', 'Level', 'Symmetrical', 'WFL'].includes(val);
+        const cls = isNormal
+          ? 'text-gray-900 text-sm'
+          : 'inline-block px-1.5 py-0.5 rounded text-xs font-medium ' + tintClassFor('mild');
+        posturalRows.push(/*#__PURE__*/React.createElement("div", { key: field, className: "flex items-baseline gap-2 mb-1" },
+          /*#__PURE__*/React.createElement("span", { className: "text-xs font-semibold text-gray-700 w-32" }, label + ":"),
+          /*#__PURE__*/React.createElement("span", { className: cls }, val)
+        ));
+      }
+    }
+    if (posturalRows.length > 0 || (formData.knee_palpation_notes && formData.knee_palpation_notes.trim())) {
+      blocks.push(/*#__PURE__*/React.createElement("div", { key: "postural", className: "mb-4 break-inside-avoid" },
+        /*#__PURE__*/React.createElement("div", { className: "text-xs font-bold text-blue-800 uppercase tracking-wider mb-1 border-b border-blue-100 pb-1" }, "Postural Analysis & Palpation"),
+        posturalRows.length > 0 && /*#__PURE__*/React.createElement("div", { className: "mt-2" }, posturalRows),
+        formData.knee_palpation_notes && formData.knee_palpation_notes.trim() && /*#__PURE__*/React.createElement("div", { className: "mt-2 text-sm" },
+          /*#__PURE__*/React.createElement("span", { className: "font-semibold text-gray-600 text-xs" }, "Palpation: "),
+          /*#__PURE__*/React.createElement("span", { className: "text-gray-700" }, formData.knee_palpation_notes))
+      ));
+    }
+    return blocks;
+  }
+
+  if (position === 'bottom') {
+    const blocks = [];
+
+    // Sensation R/L
+    if ((formData.knee_sensation_R && formData.knee_sensation_R.trim()) ||
+        (formData.knee_sensation_L && formData.knee_sensation_L.trim())) {
+      blocks.push(/*#__PURE__*/React.createElement("div", { key: "sens", className: "mb-3 break-inside-avoid" },
+        /*#__PURE__*/React.createElement("div", { className: "text-xs font-bold text-blue-800 uppercase tracking-wider mb-1 border-b border-blue-100 pb-1" }, "Sensation"),
+        /*#__PURE__*/React.createElement("div", { className: "grid grid-cols-2 gap-3 text-sm mt-1" },
+          /*#__PURE__*/React.createElement("div", null,
+            /*#__PURE__*/React.createElement("span", { className: "text-xs text-gray-500" }, "R: "),
+            /*#__PURE__*/React.createElement("span", { className: "text-gray-800" }, formData.knee_sensation_R || "—")),
+          /*#__PURE__*/React.createElement("div", null,
+            /*#__PURE__*/React.createElement("span", { className: "text-xs text-gray-500" }, "L: "),
+            /*#__PURE__*/React.createElement("span", { className: "text-gray-800" }, formData.knee_sensation_L || "—")))
+      ));
+    }
+
+    // Notes block (balance, special tests, joint mobility, other)
+    const noteFields = [
+      ['knee_balance_notes', 'Balance Notes'],
+      ['knee_special_notes', 'Special Tests Notes'],
+      ['knee_rom_joint_mobility_notes', 'Joint Mobility Notes'],
+      ['knee_other_notes', 'Other Observations']
+    ].filter(([k]) => formData[k] && formData[k].trim());
+    if (noteFields.length > 0) {
+      blocks.push(/*#__PURE__*/React.createElement("div", { key: "notes", className: "mb-3 break-inside-avoid" },
+        /*#__PURE__*/React.createElement("div", { className: "text-xs font-bold text-blue-800 uppercase tracking-wider mb-1 border-b border-blue-100 pb-1" }, "Clinical Notes"),
+        ...noteFields.map(([k, label]) => /*#__PURE__*/React.createElement("div", { key: k, className: "mt-2 text-sm" },
+          /*#__PURE__*/React.createElement("div", { className: "text-xs font-semibold text-gray-600" }, label + ":"),
+          /*#__PURE__*/React.createElement("p", { className: "text-gray-700 whitespace-pre-line" }, formData[k])))
+      ));
+    }
+    return blocks;
+  }
+
+  return [];
+}
+
 function RegionalExamPrintBlock({ formData, examKey }) {
   if (!hasAnyRegionalData(formData, examKey)) return null;
   if (!FINDING_RULES[examKey]) return null;
@@ -3348,10 +3825,16 @@ function RegionalExamPrintBlock({ formData, examKey }) {
       className: "text-sm text-slate-600 italic mb-4"
     }, examOpenerSentence(formData, config.label)),
 
+    // Knee-specific top extras (gait grid, postural analysis, palpation)
+    examKey === 'knee' && renderKneeExtras(formData, 'top'),
+
     // Body — each subsection grouped
     subsectionBlocks.length > 0 && /*#__PURE__*/React.createElement("div", {
       className: "mb-6"
     }, subsectionBlocks),
+
+    // Knee-specific bottom extras (sensation, notes)
+    examKey === 'knee' && renderKneeExtras(formData, 'bottom'),
 
     // Notes fields (cervical only for now)
     specialTestNotes && /*#__PURE__*/React.createElement("div", {
@@ -3519,6 +4002,9 @@ function findBiomechanicsFindings(formData) {
   };
   checkROMThresh(formData.hip_flex_R, THRESHOLDS.hip_flex, 'Hip Flexion', 'R', 'Hip ROM');
   checkROMThresh(formData.hip_flex_L, THRESHOLDS.hip_flex, 'Hip Flexion', 'L', 'Hip ROM');
+  // SLR (Straight Leg Raise) — norm 62°
+  checkROMThresh(formData.slr_R, THRESHOLDS.slr, 'SLR', 'R', 'Hip ROM');
+  checkROMThresh(formData.slr_L, THRESHOLDS.slr, 'SLR', 'L', 'Hip ROM');
   checkROMThresh(formData.hip_ir_R, THRESHOLDS.hip_ir, 'Hip IR', 'R', 'Hip ROM');
   checkROMThresh(formData.hip_ir_L, THRESHOLDS.hip_ir, 'Hip IR', 'L', 'Hip ROM');
   checkROMThresh(formData.hip_er_R, THRESHOLDS.hip_er, 'Hip ER', 'R', 'Hip ROM');
@@ -3569,6 +4055,32 @@ function findBiomechanicsFindings(formData) {
     }
   }
 
+  // 10. SI Mobility in Quadruped — restrictions and pain
+  for (const side of ['R', 'L']) {
+    const ori = formData[`pelvis_si_quad_${side}_orientation`];
+    const sev = formData[`pelvis_si_quad_${side}_severity`];
+    const pain = formData[`pelvis_si_quad_${side}_pain`];
+    if (ori === 'Posterior' || ori === 'Anterior') {
+      const fullName = ori === 'Posterior'
+        ? 'Posterior innominate rotation restriction'
+        : 'Anterior rotation restriction';
+      findings.push({
+        category: 'Mobility', subsection: 'SI Mobility in Quadruped',
+        label: fullName, side,
+        value: sev ? `${sev}` : 'Restriction',
+        kind: 'restriction'
+      });
+    }
+    if (pain && pain !== 'None') {
+      findings.push({
+        category: 'Mobility', subsection: 'SI Mobility in Quadruped',
+        label: 'SI joint pain', side,
+        value: pain,
+        kind: 'pain'
+      });
+    }
+  }
+
   return findings;
 }
 
@@ -3580,8 +4092,9 @@ function ConsolidatedFindingsBlock({ formData, selectedExams }) {
   const selectionKeyMap = {
     cervical:    'regCervical',
     lumbopelvic: 'regLumbar',
+    knee:        'regKnee',
     // Add future regional exams as they become selectable:
-    // upperExt: 'regUpperExt', hip: 'regHip', knee: 'regKnee', ankle: 'regAnkle', neuro: 'regNeuro',
+    // upperExt: 'regUpperExt', hip: 'regHip', ankle: 'regAnkle', neuro: 'regNeuro',
   };
 
   // Collect findings per exam.  Skip any exam whose checkbox is unchecked,
@@ -3696,6 +4209,13 @@ const BiomechanicsExam = () => {
     regLumbar_posture: true,
     regHip_posture: true,
     regKnee_posture: true,
+    regKnee_gait: true,
+    regKnee_palpation: true,
+    regKnee_mmt: true,
+    regKnee_balance: true,
+    regKnee_special: true,
+    regKnee_rom: true,
+    regKnee_neuro: true,
     regAnkle_posture: true,
     regNeuro_posture: true
   });
@@ -3826,6 +4346,19 @@ const BiomechanicsExam = () => {
     toe_touch_sacrum: '',
     hip_logroll_R: '',
     hip_logroll_L: '',
+    // SLR (Straight Leg Raise) — degrees per side with WFL toggle
+    slr_R: '',
+    slr_L: '',
+    slr_R_wfl: false,
+    slr_L_wfl: false,
+    // Pelvis / Sacrum Mobility
+    pelvis_si_quad_R_orientation: '',
+    pelvis_si_quad_R_severity: '',
+    pelvis_si_quad_R_pain: '',
+    pelvis_si_quad_L_orientation: '',
+    pelvis_si_quad_L_severity: '',
+    pelvis_si_quad_L_pain: '',
+    pelvis_sacrum_notes: '',
     hip_flex_R: '',
     hip_flex_L: '',
     hip_flex_R_wfl: false,
@@ -3912,11 +4445,91 @@ const BiomechanicsExam = () => {
     ue_fwd_flex_R: '',
     ue_fwd_flex_L: '',
     ue_fwd_flex_R_wfl: false,
-    ue_fwd_flex_L_wfl: false
+    ue_fwd_flex_L_wfl: false,
+    // ====================================================================
+    // KNEE EXAM
+    // ====================================================================
+    // Gait observations — free-text per body region per gait phase.
+    // IC = Initial Contact, SLS = Single Limb Stance, SLA = Single Limb Ascent
+    knee_gait_ic_ankle: '', knee_gait_ic_knee: '', knee_gait_ic_hip: '', knee_gait_ic_pelvis: '',
+    knee_gait_sls_ankle: '', knee_gait_sls_knee: '', knee_gait_sls_hip: '', knee_gait_sls_pelvis: '',
+    knee_gait_sla_ankle: '', knee_gait_sla_knee: '', knee_gait_sla_hip: '', knee_gait_sla_pelvis: '',
+    knee_gait_other: '',
+    // Postural Analysis (single-selection pill groups)
+    knee_postural_thoracic_kyphosis: [],
+    knee_postural_lumbar_lordosis: [],
+    knee_postural_pelvic_tilt: [],
+    knee_postural_calcaneus: [],
+    knee_postural_R_knee: [],
+    knee_postural_L_knee: [],
+    knee_palpation_notes: '',
+    // MMT / Strength (use existing 5/5 grades)
+    wfl_knee_mmt: false,
+    knee_str_hip_flex_R: '', knee_str_hip_flex_L: '',
+    knee_str_knee_ext_R: '', knee_str_knee_ext_L: '',
+    knee_str_knee_flex_R: '', knee_str_knee_flex_L: '',
+    knee_str_ankle_df_R: '', knee_str_ankle_df_L: '',
+    knee_str_ankle_pf_R: '', knee_str_ankle_pf_L: '',
+    knee_str_hip_abd_R: '', knee_str_hip_abd_L: '',
+    knee_str_hip_ext_R: '', knee_str_hip_ext_L: '',
+    knee_str_ankle_inv_R: '', knee_str_ankle_inv_L: '',
+    knee_str_ankle_ev_R: '', knee_str_ankle_ev_L: '',
+    knee_str_great_toe_ext_R: '', knee_str_great_toe_ext_L: '',
+    // Balance Tests (WFL / Mild / Mod / Sig deficit)
+    wfl_knee_balance: false,
+    knee_bal_sl_balance_R: '', knee_bal_sl_balance_L: '',
+    knee_bal_romberg: '',
+    knee_bal_sharpened_RL: '', knee_bal_sharpened_LR: '',
+    knee_bal_sl_squat_R: '', knee_bal_sl_squat_L: '',
+    knee_balance_notes: '',
+    // Special Tests (Pos/Neg, R/L)
+    wfl_knee_special: false,
+    knee_sp_thomas_R: '', knee_sp_thomas_L: '',
+    knee_sp_ober_R: '', knee_sp_ober_L: '',
+    knee_sp_valgus_varus_0_R: '', knee_sp_valgus_varus_0_L: '',
+    knee_sp_valgus_varus_30_R: '', knee_sp_valgus_varus_30_L: '',
+    knee_sp_anterior_drawer_R: '', knee_sp_anterior_drawer_L: '',
+    knee_sp_lachmans_R: '', knee_sp_lachmans_L: '',
+    knee_sp_posterior_drawer_R: '', knee_sp_posterior_drawer_L: '',
+    knee_sp_thessalys_R: '', knee_sp_thessalys_L: '',
+    knee_sp_apley_R: '', knee_sp_apley_L: '',
+    knee_sp_patellar_grind_R: '', knee_sp_patellar_grind_L: '',
+    knee_special_notes: '',
+    // Range of Motion
+    wfl_knee_rom: false,
+    knee_rom_hip_flex_prom_R: '', knee_rom_hip_flex_prom_L: '',
+    knee_rom_knee_ext_R_arom: '', knee_rom_knee_ext_R_prom: '',
+    knee_rom_knee_ext_L_arom: '', knee_rom_knee_ext_L_prom: '',
+    knee_rom_knee_flex_R_arom: '', knee_rom_knee_flex_R_prom: '',
+    knee_rom_knee_flex_L_arom: '', knee_rom_knee_flex_L_prom: '',
+    knee_rom_ham_90_R: '', knee_rom_ham_90_L: '',
+    knee_rom_slr_R: '', knee_rom_slr_L: '',
+    knee_rom_df_R_arom: '', knee_rom_df_R_prom: '',
+    knee_rom_df_L_arom: '', knee_rom_df_L_prom: '',
+    knee_rom_df_kw_R: '', knee_rom_df_kw_L: '',
+    knee_rom_pf_R_arom: '', knee_rom_pf_R_prom: '',
+    knee_rom_pf_L_arom: '', knee_rom_pf_L_prom: '',
+    knee_rom_hip_er_R_arom: '', knee_rom_hip_er_R_prom: '',
+    knee_rom_hip_er_L_arom: '', knee_rom_hip_er_L_prom: '',
+    knee_rom_hip_ir_R_arom: '', knee_rom_hip_ir_R_prom: '',
+    knee_rom_hip_ir_L_arom: '', knee_rom_hip_ir_L_prom: '',
+    knee_rom_hip_abd_R_arom: '', knee_rom_hip_abd_R_prom: '',
+    knee_rom_hip_abd_L_arom: '', knee_rom_hip_abd_L_prom: '',
+    knee_rom_hip_add_R_arom: '', knee_rom_hip_add_R_prom: '',
+    knee_rom_hip_add_L_arom: '', knee_rom_hip_add_L_prom: '',
+    knee_rom_mtp_R_arom: '', knee_rom_mtp_R_prom: '',
+    knee_rom_mtp_L_arom: '', knee_rom_mtp_L_prom: '',
+    knee_rom_joint_mobility_notes: '',
+    // Sensation, Reflexes, Other
+    knee_sensation_R: '', knee_sensation_L: '',
+    knee_dtr_patella_R: '', knee_dtr_patella_L: '',
+    knee_dtr_achilles_R: '', knee_dtr_achilles_L: '',
+    knee_dtr_babinski_R: '', knee_dtr_babinski_L: '',
+    knee_other_notes: ''
   };
   const [formData, setFormData] = useState(initialData);
   useEffect(() => {
-    const SCHEMA_VERSION = 'v7'; // bump when initialData shape changes
+    const SCHEMA_VERSION = 'v9'; // bump when initialData shape changes
     const savedRaw = localStorage.getItem('bioExamData');
     const savedVersion = localStorage.getItem('bioExamDataVersion');
     if (savedRaw && savedVersion === SCHEMA_VERSION) {
@@ -4328,6 +4941,13 @@ const BiomechanicsExam = () => {
       rVal: formData.hip_logroll_R,
       lVal: formData.hip_logroll_L
     }), /*#__PURE__*/React.createElement(ReadOnlyDual, {
+      label: "SLR",
+      rVal: formData.slr_R,
+      lVal: formData.slr_L,
+      rWfl: formData.slr_R_wfl,
+      lWfl: formData.slr_L_wfl,
+      suffix: "deg"
+    }), /*#__PURE__*/React.createElement(ReadOnlyDual, {
       label: "Hip Flexion",
       rVal: formData.hip_flex_R,
       lVal: formData.hip_flex_L,
@@ -4361,7 +4981,34 @@ const BiomechanicsExam = () => {
       label: "Prone Quad",
       rVal: formData.prone_quad_R,
       lVal: formData.prone_quad_L
-    })), /*#__PURE__*/React.createElement("div", {
+    })),
+    // Pelvis / Sacrum Mobility — only print if there's data
+    (formData.pelvis_si_quad_R_orientation || formData.pelvis_si_quad_L_orientation || (formData.pelvis_sacrum_notes && formData.pelvis_sacrum_notes.trim())) && /*#__PURE__*/React.createElement("div", {
+      className: "mt-4 break-inside-avoid"
+    }, /*#__PURE__*/React.createElement("h4", {
+      className: "font-bold text-lg text-blue-800 mb-3 border-b border-blue-200 pb-1 uppercase text-xs tracking-wider"
+    }, "Pelvis / Sacrum Mobility"),
+      /*#__PURE__*/React.createElement(ReadOnlySIQuadruped, {
+        side: "R",
+        orientation: formData.pelvis_si_quad_R_orientation,
+        severity: formData.pelvis_si_quad_R_severity,
+        pain: formData.pelvis_si_quad_R_pain
+      }),
+      /*#__PURE__*/React.createElement(ReadOnlySIQuadruped, {
+        side: "L",
+        orientation: formData.pelvis_si_quad_L_orientation,
+        severity: formData.pelvis_si_quad_L_severity,
+        pain: formData.pelvis_si_quad_L_pain
+      }),
+      formData.pelvis_sacrum_notes && formData.pelvis_sacrum_notes.trim() && /*#__PURE__*/React.createElement("div", {
+        className: "mt-2 text-sm"
+      }, /*#__PURE__*/React.createElement("span", {
+        className: "font-semibold text-gray-600 text-xs"
+      }, "Notes: "), /*#__PURE__*/React.createElement("span", {
+        className: "text-gray-700"
+      }, formData.pelvis_sacrum_notes))
+    ),
+    /*#__PURE__*/React.createElement("div", {
       className: "mt-4"
     }, /*#__PURE__*/React.createElement("h4", {
       className: "font-bold text-lg text-blue-800 mb-3 border-b border-blue-200 pb-1 uppercase text-xs tracking-wider"
@@ -4548,6 +5195,10 @@ const BiomechanicsExam = () => {
       className: "text-xs text-gray-600 mt-1 italic"
     }, formData.shoe_notes)), selectedExams.regCervical && /*#__PURE__*/React.createElement(RegionalExamPrintBlock, {
       formData: formData, examKey: 'cervical'
+    }), selectedExams.regLumbar && /*#__PURE__*/React.createElement(RegionalExamPrintBlock, {
+      formData: formData, examKey: 'lumbopelvic'
+    }), selectedExams.regKnee && /*#__PURE__*/React.createElement(RegionalExamPrintBlock, {
+      formData: formData, examKey: 'knee'
     }), /*#__PURE__*/React.createElement(ConsolidatedFindingsBlock, {
       selectedExams: selectedExams,
       formData: formData
@@ -4908,6 +5559,13 @@ const BiomechanicsExam = () => {
     data: formData,
     onChange: handleChange
   }), /*#__PURE__*/React.createElement(DualInputRow, {
+    label: "SLR",
+    baseName: "slr",
+    data: formData,
+    onChange: handleChange,
+    placeholder: "deg",
+    showWFL: true
+  }), /*#__PURE__*/React.createElement(DualInputRow, {
     label: "Hip Flexion",
     baseName: "hip_flex",
     data: formData,
@@ -4958,7 +5616,32 @@ const BiomechanicsExam = () => {
     placeholder: "Clinical observations, pattern of restriction, special findings...",
     value: formData.hip_exam_notes || '',
     onChange: e => handleChange('hip_exam_notes', e.target.value)
-  })), /*#__PURE__*/React.createElement("h4", {
+  })),
+  /*#__PURE__*/React.createElement("h4", {
+    className: "font-bold text-gray-800 mt-4 mb-3 bg-blue-50 p-2 rounded"
+  }, "Pelvis / Sacrum Mobility"),
+  /*#__PURE__*/React.createElement(SIQuadrupedRow, {
+    side: "R",
+    data: formData,
+    onChange: handleChange
+  }),
+  /*#__PURE__*/React.createElement(SIQuadrupedRow, {
+    side: "L",
+    data: formData,
+    onChange: handleChange
+  }),
+  /*#__PURE__*/React.createElement("div", { className: "mb-3" },
+    /*#__PURE__*/React.createElement("label", {
+      className: "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1"
+    }, "Pelvis / Sacrum Notes"),
+    /*#__PURE__*/React.createElement("textarea", {
+      className: "w-full p-2 bg-gray-50 rounded border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none h-16",
+      placeholder: "End-feel, reproduction of symptoms, additional mobility findings...",
+      value: formData.pelvis_sacrum_notes || '',
+      onChange: e => handleChange('pelvis_sacrum_notes', e.target.value)
+    })
+  ),
+  /*#__PURE__*/React.createElement("h4", {
     className: "font-bold text-gray-800 mt-4 mb-3 bg-blue-50 p-2 rounded"
   }, "Hip Strength and Leg Length"), /*#__PURE__*/React.createElement(DualDropdownRow, {
     label: "Prone Hamstring",
@@ -5411,9 +6094,206 @@ const BiomechanicsExam = () => {
     onToggleSelected: () => toggleSelected('regKnee')
   }), expandedSections.regKnee && /*#__PURE__*/React.createElement("div", {
     className: "bg-white p-4 rounded-b-lg shadow-sm"
-  }, /*#__PURE__*/React.createElement("div", { className: "mb-3 border border-gray-200 rounded" }, /*#__PURE__*/React.createElement("div", { onClick: () => toggleSection('regKnee_posture'), className: "flex items-center justify-between bg-slate-50 hover:bg-slate-100 cursor-pointer p-2 select-none" }, /*#__PURE__*/React.createElement("div", { className: "flex items-center gap-2" }, /*#__PURE__*/React.createElement(Icon, { name: "user", size: 14, className: "text-slate-500" }), /*#__PURE__*/React.createElement("span", { className: "text-sm font-bold text-slate-700" }, "Standing Posture")), /*#__PURE__*/React.createElement(Icon, { name: expandedSections.regKnee_posture ? "chevron-up" : "chevron-down", size: 16, className: "text-slate-400" })), expandedSections.regKnee_posture && /*#__PURE__*/React.createElement("div", { className: "p-2" }, /*#__PURE__*/React.createElement(StandingPostureBlock, { formData: formData, handleChange: handleChange }))),  /*#__PURE__*/React.createElement("p", {
-    className: "text-sm text-gray-400 italic"
-  }, "Knee exam content will be added here. Provide the layout and fields for this exam.")), /*#__PURE__*/React.createElement(SectionHeader, {
+  }, /*#__PURE__*/React.createElement("div", { className: "mb-3 border border-gray-200 rounded" }, /*#__PURE__*/React.createElement("div", { onClick: () => toggleSection('regKnee_posture'), className: "flex items-center justify-between bg-slate-50 hover:bg-slate-100 cursor-pointer p-2 select-none" }, /*#__PURE__*/React.createElement("div", { className: "flex items-center gap-2" }, /*#__PURE__*/React.createElement(Icon, { name: "user", size: 14, className: "text-slate-500" }), /*#__PURE__*/React.createElement("span", { className: "text-sm font-bold text-slate-700" }, "Standing Posture")), /*#__PURE__*/React.createElement(Icon, { name: expandedSections.regKnee_posture ? "chevron-up" : "chevron-down", size: 16, className: "text-slate-400" })), expandedSections.regKnee_posture && /*#__PURE__*/React.createElement("div", { className: "p-2" }, /*#__PURE__*/React.createElement(StandingPostureBlock, { formData: formData, handleChange: handleChange }))),  /*#__PURE__*/React.createElement("div", { className: "mb-3 border border-gray-200 rounded" },
+  /*#__PURE__*/React.createElement("div", { onClick: () => toggleSection('regKnee_gait'), className: "flex items-center justify-between bg-slate-50 hover:bg-slate-100 cursor-pointer p-2 select-none" },
+    /*#__PURE__*/React.createElement("div", { className: "flex items-center gap-2" },
+      /*#__PURE__*/React.createElement(Icon, { name: "footprints", size: 14, className: "text-slate-500" }),
+      /*#__PURE__*/React.createElement("span", { className: "text-sm font-bold text-slate-700" }, "Gait Observation")),
+    /*#__PURE__*/React.createElement(Icon, { name: expandedSections.regKnee_gait ? "chevron-up" : "chevron-down", size: 16, className: "text-slate-400" })),
+  expandedSections.regKnee_gait && /*#__PURE__*/React.createElement("div", { className: "p-3" },
+    /*#__PURE__*/React.createElement("p", { className: "text-xs text-gray-500 italic mb-2" }, "Free-text observations per body region per gait phase. Leave blank if normal."),
+    /*#__PURE__*/React.createElement("div", { className: "grid grid-cols-5 gap-2 text-xs" },
+      /*#__PURE__*/React.createElement("div", { className: "font-bold text-gray-600" }, ""),
+      /*#__PURE__*/React.createElement("div", { className: "font-bold text-gray-600 text-center" }, "Ankle"),
+      /*#__PURE__*/React.createElement("div", { className: "font-bold text-gray-600 text-center" }, "Knee"),
+      /*#__PURE__*/React.createElement("div", { className: "font-bold text-gray-600 text-center" }, "Hip"),
+      /*#__PURE__*/React.createElement("div", { className: "font-bold text-gray-600 text-center" }, "Pelvis / Trunk"),
+      /*#__PURE__*/React.createElement("div", { className: "font-semibold text-gray-700 self-center" }, "IC"),
+      /*#__PURE__*/React.createElement("input", { type: "text", className: "p-1 border border-gray-300 rounded text-sm", value: formData.knee_gait_ic_ankle, onChange: e => handleChange('knee_gait_ic_ankle', e.target.value) }),
+      /*#__PURE__*/React.createElement("input", { type: "text", className: "p-1 border border-gray-300 rounded text-sm", value: formData.knee_gait_ic_knee, onChange: e => handleChange('knee_gait_ic_knee', e.target.value) }),
+      /*#__PURE__*/React.createElement("input", { type: "text", className: "p-1 border border-gray-300 rounded text-sm", value: formData.knee_gait_ic_hip, onChange: e => handleChange('knee_gait_ic_hip', e.target.value) }),
+      /*#__PURE__*/React.createElement("input", { type: "text", className: "p-1 border border-gray-300 rounded text-sm", value: formData.knee_gait_ic_pelvis, onChange: e => handleChange('knee_gait_ic_pelvis', e.target.value) }),
+      /*#__PURE__*/React.createElement("div", { className: "font-semibold text-gray-700 self-center" }, "SLS"),
+      /*#__PURE__*/React.createElement("input", { type: "text", className: "p-1 border border-gray-300 rounded text-sm", value: formData.knee_gait_sls_ankle, onChange: e => handleChange('knee_gait_sls_ankle', e.target.value) }),
+      /*#__PURE__*/React.createElement("input", { type: "text", className: "p-1 border border-gray-300 rounded text-sm", value: formData.knee_gait_sls_knee, onChange: e => handleChange('knee_gait_sls_knee', e.target.value) }),
+      /*#__PURE__*/React.createElement("input", { type: "text", className: "p-1 border border-gray-300 rounded text-sm", value: formData.knee_gait_sls_hip, onChange: e => handleChange('knee_gait_sls_hip', e.target.value) }),
+      /*#__PURE__*/React.createElement("input", { type: "text", className: "p-1 border border-gray-300 rounded text-sm", value: formData.knee_gait_sls_pelvis, onChange: e => handleChange('knee_gait_sls_pelvis', e.target.value) }),
+      /*#__PURE__*/React.createElement("div", { className: "font-semibold text-gray-700 self-center" }, "SLA"),
+      /*#__PURE__*/React.createElement("input", { type: "text", className: "p-1 border border-gray-300 rounded text-sm", value: formData.knee_gait_sla_ankle, onChange: e => handleChange('knee_gait_sla_ankle', e.target.value) }),
+      /*#__PURE__*/React.createElement("input", { type: "text", className: "p-1 border border-gray-300 rounded text-sm", value: formData.knee_gait_sla_knee, onChange: e => handleChange('knee_gait_sla_knee', e.target.value) }),
+      /*#__PURE__*/React.createElement("input", { type: "text", className: "p-1 border border-gray-300 rounded text-sm", value: formData.knee_gait_sla_hip, onChange: e => handleChange('knee_gait_sla_hip', e.target.value) }),
+      /*#__PURE__*/React.createElement("input", { type: "text", className: "p-1 border border-gray-300 rounded text-sm", value: formData.knee_gait_sla_pelvis, onChange: e => handleChange('knee_gait_sla_pelvis', e.target.value) })
+    ),
+    /*#__PURE__*/React.createElement("label", { className: "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 mt-3" }, "Other Gait Observations"),
+    /*#__PURE__*/React.createElement("textarea", { className: "w-full p-2 bg-gray-50 rounded border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none h-16", placeholder: "Cadence, stride length, foot strike, asymmetries...", value: formData.knee_gait_other, onChange: e => handleChange('knee_gait_other', e.target.value) })
+  )
+),
+/*#__PURE__*/React.createElement("div", { className: "mb-3 border border-gray-200 rounded" },
+  /*#__PURE__*/React.createElement("div", { onClick: () => toggleSection('regKnee_palpation'), className: "flex items-center justify-between bg-slate-50 hover:bg-slate-100 cursor-pointer p-2 select-none" },
+    /*#__PURE__*/React.createElement("div", { className: "flex items-center gap-2" },
+      /*#__PURE__*/React.createElement(Icon, { name: "user", size: 14, className: "text-slate-500" }),
+      /*#__PURE__*/React.createElement("span", { className: "text-sm font-bold text-slate-700" }, "Postural Analysis & Palpation")),
+    /*#__PURE__*/React.createElement(Icon, { name: expandedSections.regKnee_palpation ? "chevron-up" : "chevron-down", size: 16, className: "text-slate-400" })),
+  expandedSections.regKnee_palpation && /*#__PURE__*/React.createElement("div", { className: "p-3" },
+    /*#__PURE__*/React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3" },
+      /*#__PURE__*/React.createElement(PostureGroup, { label: "Thoracic Kyphosis", name: "knee_postural_thoracic_kyphosis", options: ["Neutral", "Increased", "Decreased"], data: formData, onChange: handleChange }),
+      /*#__PURE__*/React.createElement(PostureGroup, { label: "Lumbar Lordosis", name: "knee_postural_lumbar_lordosis", options: ["Neutral", "Increased", "Decreased"], data: formData, onChange: handleChange }),
+      /*#__PURE__*/React.createElement(PostureGroup, { label: "Pelvic Tilt", name: "knee_postural_pelvic_tilt", options: ["Neutral", "Anterior", "Posterior"], data: formData, onChange: handleChange }),
+      /*#__PURE__*/React.createElement(PostureGroup, { label: "Calcaneus", name: "knee_postural_calcaneus", options: ["Neutral", "Inverted", "Everted"], data: formData, onChange: handleChange }),
+      /*#__PURE__*/React.createElement(PostureGroup, { label: "R Knee", name: "knee_postural_R_knee", options: ["Neutral", "Valgus", "Varus"], data: formData, onChange: handleChange }),
+      /*#__PURE__*/React.createElement(PostureGroup, { label: "L Knee", name: "knee_postural_L_knee", options: ["Neutral", "Valgus", "Varus"], data: formData, onChange: handleChange })
+    ),
+    /*#__PURE__*/React.createElement("label", { className: "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 mt-3" }, "Palpation"),
+    /*#__PURE__*/React.createElement("textarea", { className: "w-full p-2 bg-gray-50 rounded border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none h-20", placeholder: "Tender points, effusion, warmth, structures palpated...", value: formData.knee_palpation_notes, onChange: e => handleChange('knee_palpation_notes', e.target.value) })
+  )
+),
+/*#__PURE__*/React.createElement("div", { className: "mb-3 border border-gray-200 rounded" },
+  /*#__PURE__*/React.createElement("div", { onClick: () => toggleSection('regKnee_mmt'), className: "flex items-center justify-between bg-slate-50 hover:bg-slate-100 cursor-pointer p-2 select-none" },
+    /*#__PURE__*/React.createElement("div", { className: "flex items-center gap-2" },
+      /*#__PURE__*/React.createElement(Icon, { name: "activity", size: 14, className: "text-slate-500" }),
+      /*#__PURE__*/React.createElement("span", { className: "text-sm font-bold text-slate-700" }, "MMT / Strength")),
+    /*#__PURE__*/React.createElement(Icon, { name: expandedSections.regKnee_mmt ? "chevron-up" : "chevron-down", size: 16, className: "text-slate-400" })),
+  expandedSections.regKnee_mmt && /*#__PURE__*/React.createElement("div", { className: "p-3" },
+    /*#__PURE__*/React.createElement(WFLSectionToggle, { baseName: "knee_mmt", data: formData, onChange: handleChange, clearFields: ["knee_str_hip_flex_R","knee_str_hip_flex_L","knee_str_knee_ext_R","knee_str_knee_ext_L","knee_str_knee_flex_R","knee_str_knee_flex_L","knee_str_ankle_df_R","knee_str_ankle_df_L","knee_str_ankle_pf_R","knee_str_ankle_pf_L","knee_str_hip_abd_R","knee_str_hip_abd_L","knee_str_hip_ext_R","knee_str_hip_ext_L","knee_str_ankle_inv_R","knee_str_ankle_inv_L","knee_str_ankle_ev_R","knee_str_ankle_ev_L","knee_str_great_toe_ext_R","knee_str_great_toe_ext_L"], label: "All within functional limits" }),
+    /*#__PURE__*/React.createElement(MyotomeLabeledRow, { muscle: "Hip Flexion", level: "L2", baseName: "knee_str_hip_flex", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_mmt }),
+    /*#__PURE__*/React.createElement(MyotomeLabeledRow, { muscle: "Knee Extension", level: "L3", baseName: "knee_str_knee_ext", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_mmt }),
+    /*#__PURE__*/React.createElement(MyotomeLabeledRow, { muscle: "Knee Flexion", level: "", baseName: "knee_str_knee_flex", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_mmt }),
+    /*#__PURE__*/React.createElement(MyotomeLabeledRow, { muscle: "Ankle DF", level: "L4", baseName: "knee_str_ankle_df", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_mmt }),
+    /*#__PURE__*/React.createElement(MyotomeLabeledRow, { muscle: "Ankle PF", level: "S1", baseName: "knee_str_ankle_pf", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_mmt }),
+    /*#__PURE__*/React.createElement(MyotomeLabeledRow, { muscle: "Hip Abduction", level: "", baseName: "knee_str_hip_abd", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_mmt }),
+    /*#__PURE__*/React.createElement(MyotomeLabeledRow, { muscle: "Hip Extension", level: "", baseName: "knee_str_hip_ext", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_mmt }),
+    /*#__PURE__*/React.createElement(MyotomeLabeledRow, { muscle: "Ankle Inversion", level: "", baseName: "knee_str_ankle_inv", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_mmt }),
+    /*#__PURE__*/React.createElement(MyotomeLabeledRow, { muscle: "Ankle Eversion", level: "", baseName: "knee_str_ankle_ev", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_mmt }),
+    /*#__PURE__*/React.createElement(MyotomeLabeledRow, { muscle: "Great Toe Extension", level: "L5", baseName: "knee_str_great_toe_ext", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_mmt })
+  )
+),
+/*#__PURE__*/React.createElement("div", { className: "mb-3 border border-gray-200 rounded" },
+  /*#__PURE__*/React.createElement("div", { onClick: () => toggleSection('regKnee_balance'), className: "flex items-center justify-between bg-slate-50 hover:bg-slate-100 cursor-pointer p-2 select-none" },
+    /*#__PURE__*/React.createElement("div", { className: "flex items-center gap-2" },
+      /*#__PURE__*/React.createElement(Icon, { name: "user", size: 14, className: "text-slate-500" }),
+      /*#__PURE__*/React.createElement("span", { className: "text-sm font-bold text-slate-700" }, "Balance & Functional")),
+    /*#__PURE__*/React.createElement(Icon, { name: expandedSections.regKnee_balance ? "chevron-up" : "chevron-down", size: 16, className: "text-slate-400" })),
+  expandedSections.regKnee_balance && /*#__PURE__*/React.createElement("div", { className: "p-3" },
+    /*#__PURE__*/React.createElement(WFLSectionToggle, { baseName: "knee_balance", data: formData, onChange: handleChange, clearFields: ["knee_bal_sl_balance_R","knee_bal_sl_balance_L","knee_bal_romberg","knee_bal_sharpened_RL","knee_bal_sharpened_LR","knee_bal_sl_squat_R","knee_bal_sl_squat_L"], label: "All within functional limits" }),
+    /*#__PURE__*/React.createElement(DeficitRow, { label: "Single-Leg Balance", baseName: "knee_bal_sl_balance", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_balance }),
+    /*#__PURE__*/React.createElement("div", { className: "mb-3 grid grid-cols-12 gap-2 items-center pb-1 border-b border-gray-100" },
+      /*#__PURE__*/React.createElement("div", { className: "col-span-5" },
+        /*#__PURE__*/React.createElement("span", { className: "text-sm font-medium text-gray-700" }, "Romberg")),
+      /*#__PURE__*/React.createElement("div", { className: "col-span-7 flex items-center gap-1 flex-wrap" },
+        ["WFL","Mild","Mod","Sig"].map(opt => /*#__PURE__*/React.createElement("button", {
+          key: opt, type: "button",
+          onClick: () => handleChange("knee_bal_romberg", formData.knee_bal_romberg === opt ? "" : opt),
+          className: `text-[10px] px-1.5 py-0.5 border rounded cursor-pointer ${formData.knee_bal_romberg === opt ? (opt === "WFL" ? "bg-green-50 text-green-700 border-green-400 font-bold" : opt === "Mild" ? "bg-amber-50 text-amber-700 border-amber-400 font-bold" : opt === "Mod" ? "bg-orange-50 text-orange-700 border-orange-400 font-bold" : "bg-red-50 text-red-700 border-red-400 font-bold") : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`
+        }, opt)))
+    ),
+    /*#__PURE__*/React.createElement("div", { className: "mb-3 grid grid-cols-12 gap-2 items-center pb-1 border-b border-gray-100" },
+      /*#__PURE__*/React.createElement("div", { className: "col-span-5" },
+        /*#__PURE__*/React.createElement("span", { className: "text-sm font-medium text-gray-700" }, "Sharpened Romberg (R/L)")),
+      /*#__PURE__*/React.createElement("div", { className: "col-span-7 flex items-center gap-1 flex-wrap" },
+        ["WFL","Mild","Mod","Sig"].map(opt => /*#__PURE__*/React.createElement("button", {
+          key: opt, type: "button",
+          onClick: () => handleChange("knee_bal_sharpened_RL", formData.knee_bal_sharpened_RL === opt ? "" : opt),
+          className: `text-[10px] px-1.5 py-0.5 border rounded cursor-pointer ${formData.knee_bal_sharpened_RL === opt ? (opt === "WFL" ? "bg-green-50 text-green-700 border-green-400 font-bold" : opt === "Mild" ? "bg-amber-50 text-amber-700 border-amber-400 font-bold" : opt === "Mod" ? "bg-orange-50 text-orange-700 border-orange-400 font-bold" : "bg-red-50 text-red-700 border-red-400 font-bold") : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`
+        }, opt)))
+    ),
+    /*#__PURE__*/React.createElement("div", { className: "mb-3 grid grid-cols-12 gap-2 items-center pb-1 border-b border-gray-100" },
+      /*#__PURE__*/React.createElement("div", { className: "col-span-5" },
+        /*#__PURE__*/React.createElement("span", { className: "text-sm font-medium text-gray-700" }, "Sharpened Romberg (L/R)")),
+      /*#__PURE__*/React.createElement("div", { className: "col-span-7 flex items-center gap-1 flex-wrap" },
+        ["WFL","Mild","Mod","Sig"].map(opt => /*#__PURE__*/React.createElement("button", {
+          key: opt, type: "button",
+          onClick: () => handleChange("knee_bal_sharpened_LR", formData.knee_bal_sharpened_LR === opt ? "" : opt),
+          className: `text-[10px] px-1.5 py-0.5 border rounded cursor-pointer ${formData.knee_bal_sharpened_LR === opt ? (opt === "WFL" ? "bg-green-50 text-green-700 border-green-400 font-bold" : opt === "Mild" ? "bg-amber-50 text-amber-700 border-amber-400 font-bold" : opt === "Mod" ? "bg-orange-50 text-orange-700 border-orange-400 font-bold" : "bg-red-50 text-red-700 border-red-400 font-bold") : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`
+        }, opt)))
+    ),
+    /*#__PURE__*/React.createElement(DeficitRow, { label: "Single-Leg Squat", baseName: "knee_bal_sl_squat", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_balance }),
+    /*#__PURE__*/React.createElement("label", { className: "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 mt-3" }, "Balance Notes"),
+    /*#__PURE__*/React.createElement("textarea", { className: "w-full p-2 bg-gray-50 rounded border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none h-16", placeholder: "Hold times, compensations, observed strategies...", value: formData.knee_balance_notes, onChange: e => handleChange('knee_balance_notes', e.target.value) })
+  )
+),
+/*#__PURE__*/React.createElement("div", { className: "mb-3 border border-gray-200 rounded" },
+  /*#__PURE__*/React.createElement("div", { onClick: () => toggleSection('regKnee_special'), className: "flex items-center justify-between bg-slate-50 hover:bg-slate-100 cursor-pointer p-2 select-none" },
+    /*#__PURE__*/React.createElement("div", { className: "flex items-center gap-2" },
+      /*#__PURE__*/React.createElement(Icon, { name: "clipboard-list", size: 14, className: "text-slate-500" }),
+      /*#__PURE__*/React.createElement("span", { className: "text-sm font-bold text-slate-700" }, "Special Tests")),
+    /*#__PURE__*/React.createElement(Icon, { name: expandedSections.regKnee_special ? "chevron-up" : "chevron-down", size: 16, className: "text-slate-400" })),
+  expandedSections.regKnee_special && /*#__PURE__*/React.createElement("div", { className: "p-3" },
+    /*#__PURE__*/React.createElement(WFLSectionToggle, { baseName: "knee_special", data: formData, onChange: handleChange, clearFields: ["knee_sp_thomas_R","knee_sp_thomas_L","knee_sp_ober_R","knee_sp_ober_L","knee_sp_valgus_varus_0_R","knee_sp_valgus_varus_0_L","knee_sp_valgus_varus_30_R","knee_sp_valgus_varus_30_L","knee_sp_anterior_drawer_R","knee_sp_anterior_drawer_L","knee_sp_lachmans_R","knee_sp_lachmans_L","knee_sp_posterior_drawer_R","knee_sp_posterior_drawer_L","knee_sp_thessalys_R","knee_sp_thessalys_L","knee_sp_apley_R","knee_sp_apley_L","knee_sp_patellar_grind_R","knee_sp_patellar_grind_L"], label: "All within functional limits" }),
+    /*#__PURE__*/React.createElement(DualBinaryRow, { label: "Thomas Test", baseName: "knee_sp_thomas", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_special }),
+    /*#__PURE__*/React.createElement(DualBinaryRow, { label: "Ober Test", baseName: "knee_sp_ober", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_special }),
+    /*#__PURE__*/React.createElement(DualBinaryRow, { label: "Valgus/Varus at 0\u00b0", baseName: "knee_sp_valgus_varus_0", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_special }),
+    /*#__PURE__*/React.createElement(DualBinaryRow, { label: "Valgus/Varus at 30\u00b0", baseName: "knee_sp_valgus_varus_30", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_special }),
+    /*#__PURE__*/React.createElement(DualBinaryRow, { label: "Anterior Drawer", baseName: "knee_sp_anterior_drawer", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_special }),
+    /*#__PURE__*/React.createElement(DualBinaryRow, { label: "Lachman\u2019s", baseName: "knee_sp_lachmans", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_special }),
+    /*#__PURE__*/React.createElement(DualBinaryRow, { label: "Posterior Drawer", baseName: "knee_sp_posterior_drawer", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_special }),
+    /*#__PURE__*/React.createElement(DualBinaryRow, { label: "Thessaly\u2019s", baseName: "knee_sp_thessalys", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_special }),
+    /*#__PURE__*/React.createElement(DualBinaryRow, { label: "Apley Compression/Distraction", baseName: "knee_sp_apley", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_special }),
+    /*#__PURE__*/React.createElement(DualBinaryRow, { label: "Patellar Grind", baseName: "knee_sp_patellar_grind", data: formData, onChange: handleChange, wflLocked: !!formData.wfl_knee_special }),
+    /*#__PURE__*/React.createElement("label", { className: "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 mt-3" }, "Special Tests Notes"),
+    /*#__PURE__*/React.createElement("textarea", { className: "w-full p-2 bg-gray-50 rounded border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none h-16", placeholder: "Pain location, end-feel, reproduction of symptoms...", value: formData.knee_special_notes, onChange: e => handleChange('knee_special_notes', e.target.value) })
+  )
+),
+/*#__PURE__*/React.createElement("div", { className: "mb-3 border border-gray-200 rounded" },
+  /*#__PURE__*/React.createElement("div", { onClick: () => toggleSection('regKnee_rom'), className: "flex items-center justify-between bg-slate-50 hover:bg-slate-100 cursor-pointer p-2 select-none" },
+    /*#__PURE__*/React.createElement("div", { className: "flex items-center gap-2" },
+      /*#__PURE__*/React.createElement(Icon, { name: "activity", size: 14, className: "text-slate-500" }),
+      /*#__PURE__*/React.createElement("span", { className: "text-sm font-bold text-slate-700" }, "Range of Motion")),
+    /*#__PURE__*/React.createElement(Icon, { name: expandedSections.regKnee_rom ? "chevron-up" : "chevron-down", size: 16, className: "text-slate-400" })),
+  expandedSections.regKnee_rom && /*#__PURE__*/React.createElement("div", { className: "p-3" },
+    /*#__PURE__*/React.createElement(WFLSectionToggle, { baseName: "knee_rom", data: formData, onChange: handleChange, clearFields: ["knee_rom_hip_flex_prom_R","knee_rom_hip_flex_prom_L","knee_rom_knee_ext_R_arom","knee_rom_knee_ext_R_prom","knee_rom_knee_ext_L_arom","knee_rom_knee_ext_L_prom","knee_rom_knee_flex_R_arom","knee_rom_knee_flex_R_prom","knee_rom_knee_flex_L_arom","knee_rom_knee_flex_L_prom","knee_rom_ham_90_R","knee_rom_ham_90_L","knee_rom_slr_R","knee_rom_slr_L","knee_rom_df_R_arom","knee_rom_df_R_prom","knee_rom_df_L_arom","knee_rom_df_L_prom","knee_rom_df_kw_R","knee_rom_df_kw_L","knee_rom_pf_R_arom","knee_rom_pf_R_prom","knee_rom_pf_L_arom","knee_rom_pf_L_prom","knee_rom_hip_er_R_arom","knee_rom_hip_er_R_prom","knee_rom_hip_er_L_arom","knee_rom_hip_er_L_prom","knee_rom_hip_ir_R_arom","knee_rom_hip_ir_R_prom","knee_rom_hip_ir_L_arom","knee_rom_hip_ir_L_prom","knee_rom_hip_abd_R_arom","knee_rom_hip_abd_R_prom","knee_rom_hip_abd_L_arom","knee_rom_hip_abd_L_prom","knee_rom_hip_add_R_arom","knee_rom_hip_add_R_prom","knee_rom_hip_add_L_arom","knee_rom_hip_add_L_prom","knee_rom_mtp_R_arom","knee_rom_mtp_R_prom","knee_rom_mtp_L_arom","knee_rom_mtp_L_prom"], label: "All within functional limits" }),
+    /*#__PURE__*/React.createElement("div", { className: "mb-2 grid grid-cols-12 gap-2 items-center pb-1 border-b border-gray-100" },
+      /*#__PURE__*/React.createElement("div", { className: "col-span-5" },
+        /*#__PURE__*/React.createElement("span", { className: "text-sm font-medium text-gray-700" }, "Hip Flexion (PROM)"),
+        /*#__PURE__*/React.createElement("span", { className: "text-[10px] text-gray-400 ml-2" }, "(120\u00b0)")),
+      /*#__PURE__*/React.createElement("div", { className: "col-span-7 flex items-center gap-3" },
+        /*#__PURE__*/React.createElement("div", { className: "flex-1 flex items-center gap-1 border-r border-gray-100 pr-2" },
+          /*#__PURE__*/React.createElement("span", { className: "text-xs text-gray-400 font-mono mr-1" }, "R:"),
+          /*#__PURE__*/React.createElement("input", { type: "text", value: formData.knee_rom_hip_flex_prom_R || "", onChange: e => handleChange("knee_rom_hip_flex_prom_R", e.target.value), placeholder: !!formData.wfl_knee_rom && !formData.knee_rom_hip_flex_prom_R ? "WFL" : "deg", className: `w-20 p-1 text-sm border rounded text-center ${!!formData.wfl_knee_rom && !formData.knee_rom_hip_flex_prom_R ? "border-green-400 text-green-700 bg-green-50 placeholder:text-green-600" : "border-gray-300 placeholder:text-gray-400"}` })),
+        /*#__PURE__*/React.createElement("div", { className: "flex-1 flex items-center gap-1" },
+          /*#__PURE__*/React.createElement("span", { className: "text-xs text-gray-400 font-mono mr-1" }, "L:"),
+          /*#__PURE__*/React.createElement("input", { type: "text", value: formData.knee_rom_hip_flex_prom_L || "", onChange: e => handleChange("knee_rom_hip_flex_prom_L", e.target.value), placeholder: !!formData.wfl_knee_rom && !formData.knee_rom_hip_flex_prom_L ? "WFL" : "deg", className: `w-20 p-1 text-sm border rounded text-center ${!!formData.wfl_knee_rom && !formData.knee_rom_hip_flex_prom_L ? "border-green-400 text-green-700 bg-green-50 placeholder:text-green-600" : "border-gray-300 placeholder:text-gray-400"}` }))
+      )
+    ),
+    /*#__PURE__*/React.createElement(ROMRow, { label: "Knee Extension", baseName: "knee_rom_knee_ext", data: formData, onChange: handleChange, norm: "(0\u00b0)", wflLocked: !!formData.wfl_knee_rom }),
+    /*#__PURE__*/React.createElement(ROMRow, { label: "Knee Flexion", baseName: "knee_rom_knee_flex", data: formData, onChange: handleChange, norm: "(0-150\u00b0)", wflLocked: !!formData.wfl_knee_rom }),
+    /*#__PURE__*/React.createElement(DualSingleROM, { label: "Hamstring 90-90", baseName: "knee_rom_ham_90", data: formData, onChange: handleChange, norm: "(155\u00b0; <125\u00b0 severe)", wflLocked: !!formData.wfl_knee_rom }),
+    /*#__PURE__*/React.createElement(DualSingleROM, { label: "SLR", baseName: "knee_rom_slr", data: formData, onChange: handleChange, norm: "(62\u00b0)", wflLocked: !!formData.wfl_knee_rom }),
+    /*#__PURE__*/React.createElement(ROMRow, { label: "Dorsiflexion", baseName: "knee_rom_df", data: formData, onChange: handleChange, norm: "(0-20\u00b0)", wflLocked: !!formData.wfl_knee_rom }),
+    /*#__PURE__*/React.createElement(DualSingleROM, { label: "DF Knee to Wall", baseName: "knee_rom_df_kw", data: formData, onChange: handleChange, norm: "", wflLocked: !!formData.wfl_knee_rom }),
+    /*#__PURE__*/React.createElement(ROMRow, { label: "Plantarflexion", baseName: "knee_rom_pf", data: formData, onChange: handleChange, norm: "(0-50\u00b0)", wflLocked: !!formData.wfl_knee_rom }),
+    /*#__PURE__*/React.createElement(ROMRow, { label: "Hip ER", baseName: "knee_rom_hip_er", data: formData, onChange: handleChange, norm: "(45\u00b0)", wflLocked: !!formData.wfl_knee_rom }),
+    /*#__PURE__*/React.createElement(ROMRow, { label: "Hip IR", baseName: "knee_rom_hip_ir", data: formData, onChange: handleChange, norm: "(45\u00b0)", wflLocked: !!formData.wfl_knee_rom }),
+    /*#__PURE__*/React.createElement(ROMRow, { label: "Hip Abduction", baseName: "knee_rom_hip_abd", data: formData, onChange: handleChange, norm: "(45\u00b0)", wflLocked: !!formData.wfl_knee_rom }),
+    /*#__PURE__*/React.createElement(ROMRow, { label: "Hip Adduction", baseName: "knee_rom_hip_add", data: formData, onChange: handleChange, norm: "(30\u00b0)", wflLocked: !!formData.wfl_knee_rom }),
+    /*#__PURE__*/React.createElement(ROMRow, { label: "1st MTP Extension", baseName: "knee_rom_mtp", data: formData, onChange: handleChange, norm: "(0-70\u00b0)", wflLocked: !!formData.wfl_knee_rom }),
+    /*#__PURE__*/React.createElement("label", { className: "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 mt-3" }, "Joint Mobility Notes"),
+    /*#__PURE__*/React.createElement("textarea", { className: "w-full p-2 bg-gray-50 rounded border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none h-16", placeholder: "Patellar mobility, tibiofemoral glides, end-feel...", value: formData.knee_rom_joint_mobility_notes, onChange: e => handleChange('knee_rom_joint_mobility_notes', e.target.value) })
+  )
+),
+/*#__PURE__*/React.createElement("div", { className: "mb-3 border border-gray-200 rounded" },
+  /*#__PURE__*/React.createElement("div", { onClick: () => toggleSection('regKnee_neuro'), className: "flex items-center justify-between bg-slate-50 hover:bg-slate-100 cursor-pointer p-2 select-none" },
+    /*#__PURE__*/React.createElement("div", { className: "flex items-center gap-2" },
+      /*#__PURE__*/React.createElement(Icon, { name: "zap", size: 14, className: "text-slate-500" }),
+      /*#__PURE__*/React.createElement("span", { className: "text-sm font-bold text-slate-700" }, "Sensation, Reflexes & Other")),
+    /*#__PURE__*/React.createElement(Icon, { name: expandedSections.regKnee_neuro ? "chevron-up" : "chevron-down", size: 16, className: "text-slate-400" })),
+  expandedSections.regKnee_neuro && /*#__PURE__*/React.createElement("div", { className: "p-3" },
+    /*#__PURE__*/React.createElement("label", { className: "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1" }, "Sensation"),
+    /*#__PURE__*/React.createElement("div", { className: "grid grid-cols-2 gap-3 mb-3" },
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("label", { className: "block text-xs text-gray-500 mb-1" }, "Right"),
+        /*#__PURE__*/React.createElement("input", { type: "text", className: "w-full p-1 border border-gray-300 rounded text-sm", placeholder: "Intact / decreased / absent...", value: formData.knee_sensation_R, onChange: e => handleChange('knee_sensation_R', e.target.value) })),
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("label", { className: "block text-xs text-gray-500 mb-1" }, "Left"),
+        /*#__PURE__*/React.createElement("input", { type: "text", className: "w-full p-1 border border-gray-300 rounded text-sm", placeholder: "Intact / decreased / absent...", value: formData.knee_sensation_L, onChange: e => handleChange('knee_sensation_L', e.target.value) }))
+    ),
+    /*#__PURE__*/React.createElement("h4", { className: "font-bold text-gray-800 mb-2 bg-blue-50 p-2 rounded mt-3" }, "Reflexes"),
+    /*#__PURE__*/React.createElement(DTRRow, { label: "Patella (L4)", baseName: "knee_dtr_patella", data: formData, onChange: handleChange }),
+    /*#__PURE__*/React.createElement(DTRRow, { label: "Achilles (S1)", baseName: "knee_dtr_achilles", data: formData, onChange: handleChange }),
+    /*#__PURE__*/React.createElement(DualBinaryRow, { label: "Babinski (UMN)", baseName: "knee_dtr_babinski", data: formData, onChange: handleChange }),
+    /*#__PURE__*/React.createElement("label", { className: "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 mt-3" }, "Other Observations"),
+    /*#__PURE__*/React.createElement("textarea", { className: "w-full p-2 bg-gray-50 rounded border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none h-20", placeholder: "Any additional observations...", value: formData.knee_other_notes, onChange: e => handleChange('knee_other_notes', e.target.value) })
+  )
+)), /*#__PURE__*/React.createElement(SectionHeader, {
     title: "Ankle Exam",
     iconName: "user",
     isOpen: expandedSections.regAnkle,

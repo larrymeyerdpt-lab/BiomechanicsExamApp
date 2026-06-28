@@ -6482,6 +6482,16 @@ const BiomechanicsExam = () => {
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(/*#__PURE__*/React.createElement(BiomechanicsExam, null));
 
+<script src="build-handoff.js"></script>
+<script>
+BUILDHandoff.apply({
+  mapping: {
+    'input[placeholder*="Jane Doe"]': function(r){ return r.identity.fullName; },
+    'input[placeholder*="JD"]':       function(r){ return r.identity.initials; },
+    'input[placeholder*="PT-"]':      function(r){ return r.janeId; },
+    'input[type="date"]':             function(r){ return r.identity.examDate; }
+  }
+});
 </script>
 </body>
 </html>

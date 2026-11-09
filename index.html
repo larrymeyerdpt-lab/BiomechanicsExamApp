@@ -4273,9 +4273,9 @@ const ExamStore = (() => {
   const getSetting = k => run('settings', 'readonly', s => s.get(k));
   const setSetting = (k, v) => run('settings', 'readwrite', s => { s.put(v, k); });
   // Record that the folder holds this exact version (only if nothing newer was saved since).
-  const markFolderSaved = (key, savedAt) => run('exams', 'readwrite', s => {
+  const markFolderSaved = (key, savedAt, field) => run('exams', 'readwrite', s => {
     const g = s.get(key);
-    g.onsuccess = () => { const r = g.result; if (r && r.savedAt === savedAt) { r.folderSavedAt = savedAt; s.put(r); } };
+    g.onsuccess = () => { const r = g.result; if (r && r.savedAt === savedAt) { r[field || 'folderSavedAt'] = savedAt; s.put(r); } };
   });
   function writeMirror(rec) {
     try {
@@ -4372,7 +4372,7 @@ const ExamStore = (() => {
     sanitizeKey, newGuid, newDraftKey, isDraftKey, migrate, hasExamData, stripPrivate,
     getExam, putExam, deleteExam, listExams, getSetting, setSetting, markFolderSaved,
     writeMirror, readMirror, folderSupported, permission, pickFolder, writeExamFile,
-    readFolderExam, listFolderExams, toFileRecord
+    readFolderExam, listFolderExams, toFileRecord, fromFileRecord
   };
 })();
 
@@ -4397,34 +4397,239 @@ const fmtExamTime = iso => {
   } catch (e) { return iso; }
 };
 
-// Small status bar under the header: save state + folder / open / download.
-const ExamSaveBar = ({ saveState, folder, committedId, hasData, onFolder, onOpen }) => {
+// ===================================================================
+// Google Drive saving (works on iPad and any browser).
+// Signs in with Google (drive.file scope: the exam can only see files it made),
+// keeps its own Drive folder "BUILD Clinical Exams", one <GUID>.json per exam.
+// GOOGLE_CLIENT_ID is the OAuth web client ID from BUILD's Google Cloud project.
+// ===================================================================
+const GOOGLE_CLIENT_ID = '687982407910-kkvmglbef7l7ahitj5mo3mqno3ifig1k.apps.googleusercontent.com';
+const DRIVE_FOLDER_NAME = 'BUILD Clinical Exams';
+const ExamDrive = (() => {
+  const API = 'https://www.googleapis.com/drive/v3';
+  const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
+  const TOKEN_KEY = 'bioExam.v10.driveToken';
+  let token = null, expiresAt = 0, tokenClient = null, folderId = null;
+  const idCache = {};
+  const lastWritten = {};
+  let chain = Promise.resolve();
+  const configured = () => !!GOOGLE_CLIENT_ID;
+
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(TOKEN_KEY) || 'null');
+    if (saved && saved.expiresAt > Date.now()) { token = saved.token; expiresAt = saved.expiresAt; }
+  } catch (e) { /* ignore */ }
+
+  let gisPromise = null;
+  function loadGis() {
+    if (window.google && google.accounts && google.accounts.oauth2) return Promise.resolve();
+    if (gisPromise) return gisPromise;
+    gisPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://accounts.google.com/gsi/client';
+      s.async = true;
+      s.onload = () => resolve();
+      s.onerror = () => { gisPromise = null; reject(new Error('Could not load Google sign-in')); };
+      document.head.appendChild(s);
+    });
+    return gisPromise;
+  }
+  // Load Google's sign-in script early, so the Connect tap can open the sign-in window right away.
+  if (configured()) loadGis().catch(() => {});
+
+  const connected = () => !!token && Date.now() < expiresAt;
+  // Must run straight from a tap (the sign-in opens a Google window).
+  function connect() {
+    return new Promise((resolve, reject) => {
+      if (!(window.google && google.accounts && google.accounts.oauth2)) {
+        loadGis().catch(() => {});
+        reject(new Error('Google sign-in is still loading — tap again in a moment'));
+        return;
+      }
+      if (!tokenClient) {
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_CLIENT_ID,
+          scope: 'https://www.googleapis.com/auth/drive.file',
+          callback: () => {}
+        });
+      }
+      tokenClient.callback = resp => {
+        if (!resp || resp.error) { reject(new Error((resp && resp.error) || 'sign-in failed')); return; }
+        token = resp.access_token;
+        expiresAt = Date.now() + Math.max(60, (Number(resp.expires_in) || 3600) - 120) * 1000;
+        try { sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ token, expiresAt })); } catch (e) { /* ignore */ }
+        resolve();
+      };
+      tokenClient.error_callback = err => reject(new Error((err && err.type) || 'sign-in closed'));
+      tokenClient.requestAccessToken({ prompt: '' });
+    });
+  }
+  function forget() {
+    token = null; expiresAt = 0;
+    try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) { /* ignore */ }
+  }
+
+  async function api(method, url, body, contentType) {
+    if (!connected()) { const e = new Error('Google Drive sign-in expired'); e.auth = true; throw e; }
+    const headers = { Authorization: 'Bearer ' + token };
+    if (contentType) headers['Content-Type'] = contentType;
+    const res = await fetch(url, { method, headers, body });
+    if (res.status === 401 || res.status === 403) {
+      if (res.status === 401) forget();
+      const e = new Error('Google Drive refused (' + res.status + ')'); e.auth = res.status === 401; e.status = res.status; throw e;
+    }
+    if (!res.ok) { const e = new Error('Google Drive error ' + res.status); e.status = res.status; throw e; }
+    const type = res.headers.get('content-type') || '';
+    return type.indexOf('json') >= 0 ? res.json() : res.text();
+  }
+  const q = s => encodeURIComponent(s);
+  const esc = s => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+  async function ensureFolder() {
+    if (folderId) return folderId;
+    const saved = await ExamStore.getSetting('driveFolderId').catch(() => null);
+    if (saved) {
+      try {
+        const f = await api('GET', API + '/files/' + saved + '?fields=id,trashed');
+        if (f && !f.trashed) { folderId = saved; return folderId; }
+      } catch (e) { if (e.auth) throw e; }
+    }
+    const found = await api('GET', API + '/files?spaces=drive&fields=files(id)&q=' +
+      q("mimeType='application/vnd.google-apps.folder' and trashed=false and appProperties has { key='buildClinicalExam' and value='folder' }"));
+    if (found.files && found.files.length) folderId = found.files[0].id;
+    else {
+      const made = await api('POST', API + '/files?fields=id', JSON.stringify({
+        name: DRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder', appProperties: { buildClinicalExam: 'folder' }
+      }), 'application/json');
+      folderId = made.id;
+    }
+    await ExamStore.setSetting('driveFolderId', folderId).catch(() => {});
+    return folderId;
+  }
+  async function findFile(name) {
+    if (idCache[name]) return idCache[name];
+    const dir = await ensureFolder();
+    const r = await api('GET', API + '/files?spaces=drive&fields=files(id,name)&q=' +
+      q("name='" + esc(name) + "' and '" + dir + "' in parents and trashed=false"));
+    const id = r.files && r.files.length ? r.files[0].id : null;
+    if (id) idCache[name] = id;
+    return id;
+  }
+  async function readById(id) {
+    const text = await api('GET', API + '/files/' + id + '?alt=media');
+    return typeof text === 'string' ? { text, json: JSON.parse(text) } : { text: JSON.stringify(text), json: text };
+  }
+  async function createFile(name, text, appProps) {
+    const dir = await ensureFolder();
+    const b = 'buildexam' + Math.random().toString(36).slice(2);
+    const meta = JSON.stringify({ name, parents: [dir], mimeType: 'application/json', appProperties: appProps || {} });
+    const body = '--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + meta + '\r\n--' + b +
+      '\r\nContent-Type: application/json\r\n\r\n' + text + '\r\n--' + b + '--';
+    const made = await api('POST', UPLOAD + '/files?uploadType=multipart&fields=id', body, 'multipart/related; boundary=' + b);
+    return made.id;
+  }
+  const fileName = examId => ExamStore.sanitizeKey(examId) + '.json';
+
+  // Same safety rules as the folder: one write at a time, backup if changed elsewhere.
+  function writeExam(rec, knownSavedAt) {
+    const job = chain.then(async () => {
+      const name = fileName(rec.examId);
+      const text = JSON.stringify(ExamStore.toFileRecord(rec), null, 2);
+      let id = await findFile(name);
+      if (id) {
+        let existing = null;
+        try { existing = await readById(id); } catch (e) { if (e.auth) throw e; }
+        const prev = existing && existing.json && existing.json.savedAt;
+        if (prev && prev !== lastWritten[name] && (!knownSavedAt || prev > knownSavedAt) && prev !== rec.savedAt) {
+          await createFile(name.replace(/\.json$/, '') + '.backup-' + prev.replace(/[:.]/g, '-') + '.json', existing.text, { buildClinicalExam: 'backup' });
+        }
+        try {
+          await api('PATCH', UPLOAD + '/files/' + id + '?uploadType=media&fields=id', text, 'application/json');
+        } catch (e) {
+          if (e.status !== 404) throw e;
+          delete idCache[name];
+          id = null;
+        }
+      }
+      if (!id) idCache[name] = await createFile(name, text, { buildClinicalExam: 'exam' });
+      lastWritten[name] = rec.savedAt;
+      return rec.savedAt;
+    });
+    chain = job.catch(() => {});
+    return job;
+  }
+  async function readExam(examId) {
+    const id = await findFile(fileName(examId));
+    if (!id) return null;
+    const f = await readById(id);
+    return f.json && f.json.data ? ExamStore.fromFileRecord(f.json) : null;
+  }
+  async function listExams() {
+    const dir = await ensureFolder();
+    const r = await api('GET', API + '/files?spaces=drive&pageSize=1000&fields=files(id,name)&q=' +
+      q("'" + dir + "' in parents and trashed=false"));
+    const files = (r.files || []).filter(f => /\.json$/i.test(f.name) && f.name.indexOf('.backup-') < 0);
+    const out = [];
+    for (let i = 0; i < files.length; i += 6) {
+      const batch = await Promise.all(files.slice(i, i + 6).map(f => readById(f.id).then(x => { idCache[f.name] = f.id; return x; }).catch(() => null)));
+      batch.forEach(x => { if (x && x.json && x.json.app === 'BUILD Clinical Exam' && x.json.data) out.push({ ...ExamStore.fromFileRecord(x.json), fromDrive: true }); });
+    }
+    return out;
+  }
+  return { configured, connected, connect, forget, writeExam, readExam, listExams, ensureFolder };
+})();
+// ===================================================================
+
+
+// Small status bar under the header: save state + Drive / folder / open.
+const ExamSaveBar = ({ saveState, folder, drive, committedId, hasData, onFolder, onDrive, onOpen }) => {
   let tone = 'text-emerald-300', text;
   const t = saveState.browserAt ? fmtExamTime(saveState.browserAt) : '';
+  const driveOn = drive.configured && drive.connected;
+  const folderOn = folder.supported && folder.perm === 'granted';
+  const where = driveOn ? 'Google Drive' : 'folder';
+  const remoteAt = driveOn ? saveState.driveAt : saveState.folderAt;
   if (saveState.status === 'pending') { tone = 'text-gray-300'; text = 'Saving…'; }
   else if (saveState.error) { tone = 'text-amber-300'; text = '⚠ ' + saveState.error; }
   else if (!saveState.browserAt) { tone = 'text-gray-400'; text = 'Autosave on — nothing entered yet'; }
-  else if (committedId && folder.perm === 'granted' && hasData && saveState.folderAt === saveState.browserAt) { text = '✓ Saved to folder ' + t; }
-  else if (committedId && folder.perm === 'granted' && hasData) { tone = 'text-gray-300'; text = 'Saved in browser ' + t + ' · writing to folder…'; }
-  else if (!folder.supported) { tone = 'text-amber-200'; text = 'Saved in browser ' + t + ' · folder saving needs Chrome or Edge'; }
+  else if (committedId && hasData && (driveOn || folderOn) && remoteAt === saveState.browserAt) { text = '✓ Saved to ' + where + ' ' + t; }
+  else if (committedId && hasData && (driveOn || folderOn)) { tone = 'text-gray-300'; text = 'Saved on this device ' + t + ' · writing to ' + where + '…'; }
+  else if (drive.configured && drive.enabled && !drive.connected) { tone = 'text-amber-200'; text = 'Saved on this device ' + t + ' · tap Reconnect Drive'; }
+  else if (!committedId && (driveOn || folderOn)) { tone = 'text-amber-200'; text = 'Saved on this device ' + t + ' · add the Client GUID to save to ' + where; }
+  else if (drive.configured && !drive.enabled && !folderOn && !(folder.supported && folder.handle)) { tone = 'text-amber-200'; text = 'Saved on this device ' + t + ' · tap Connect Google Drive'; }
+  else if (!folder.supported) { tone = 'text-amber-200'; text = 'Saved on this device ' + t + ' · folder saving needs Chrome or Edge'; }
   else if (!committedId) { tone = 'text-amber-200'; text = 'Saved in browser ' + t + ' · add the Client GUID to save to your folder'; }
   else if (!folder.handle) { tone = 'text-amber-200'; text = 'Saved in browser ' + t + ' · choose a save folder'; }
   else if (folder.perm !== 'granted') { tone = 'text-amber-200'; text = 'Saved in browser ' + t + ' · click Reconnect folder'; }
-  else { text = '✓ Saved in browser ' + t; }
-  const folderLabel = !folder.supported ? 'Choose save folder'
-    : !folder.handle ? 'Choose save folder'
+  else { text = '✓ Saved on this device ' + t; }
+  const btn = 'text-xs px-3 py-1 rounded transition-colors';
+  const strong = ' bg-blue-600 hover:bg-blue-500 text-white font-bold';
+  const warn = ' bg-amber-600 hover:bg-amber-500 text-white font-bold';
+  const quiet = ' bg-slate-800 hover:bg-slate-700';
+  // Drive button whenever Drive is set up; folder button on computers (or as the explainer when Drive isn't set up).
+  const driveLabel = !drive.configured ? null
+    : !drive.enabled ? 'Connect Google Drive'
+    : !drive.connected ? 'Reconnect Drive'
+    : '☁ Google Drive';
+  const showFolder = folder.supported || !drive.configured;
+  const folderLabel = !showFolder ? null
+    : !folder.supported || !folder.handle ? 'Choose save folder'
     : folder.perm !== 'granted' ? 'Reconnect folder'
     : '📁 ' + (folder.name || 'Folder');
-  const btn = 'text-xs px-3 py-1 rounded transition-colors';
   return React.createElement("div", { className: "max-w-3xl mx-auto mt-3 flex flex-wrap items-center gap-2 justify-between" },
     React.createElement("div", { className: "text-xs font-medium " + tone, "data-testid": "save-status" }, text),
-    React.createElement("div", { className: "flex items-center gap-2" },
+    React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+      driveLabel && React.createElement("button", {
+        onClick: onDrive,
+        title: drive.connected ? 'Saving each exam to the "' + DRIVE_FOLDER_NAME + '" folder in your Google Drive' : 'Sign in with Google so each exam saves to your Google Drive as <GUID>.json',
+        className: btn + (drive.connected ? quiet : drive.enabled ? warn : strong)
+      }, driveLabel),
       folderLabel && React.createElement("button", {
-        onClick: folder.supported ? onFolder : () => alert('Saving to a folder works in Google Chrome or Microsoft Edge on a computer.\n\nThis browser (for example Safari or an iPad) still saves every entry in this browser. Open this page in Chrome on your Mac to choose your Google Drive folder.'),
+        onClick: folder.supported ? onFolder : () => alert('Saving to a folder works in Google Chrome or Microsoft Edge on a computer.\n\nThis browser (for example Safari or an iPad) still saves every entry on this device.'),
         title: folder.perm === 'granted' ? 'Saving exams to this folder. Click to choose a different folder.' : 'Pick the folder (inside Google Drive) where each exam is saved as <GUID>.json',
-        className: btn + ' ' + (folder.supported && folder.perm === 'granted' ? 'bg-slate-800 hover:bg-slate-700' : folder.handle && folder.supported ? 'bg-amber-600 hover:bg-amber-500 text-white font-bold' : 'bg-blue-600 hover:bg-blue-500 text-white font-bold')
+        className: btn + (folderOn ? quiet : folder.handle && folder.supported ? warn : (driveLabel ? quiet : strong))
       }, folderLabel),
-      React.createElement("button", { onClick: onOpen, className: btn + ' bg-slate-800 hover:bg-slate-700' }, "Open exam")));
+      React.createElement("button", { onClick: onOpen, className: btn + quiet }, "Open exam")));
 };
 
 // List of saved exams (this browser + the save folder) to reopen.
@@ -4452,12 +4657,12 @@ const ExamOpenPanel = ({ panel, currentKey, onPick, onClose, onDownload }) => {
             className: "w-full text-left px-4 py-3 border-b hover:bg-blue-50 flex items-center gap-3 " + (it.key === currentKey ? 'bg-blue-50' : '')
           },
             React.createElement("div", { className: "flex-1 min-w-0" },
-              React.createElement("div", { className: "font-mono text-sm text-slate-800 truncate" }, it.examId || 'No GUID yet (browser only)'),
+              React.createElement("div", { className: "font-mono text-sm text-slate-800 truncate" }, it.examId || 'No GUID yet (this device only)'),
               React.createElement("div", { className: "text-xs text-gray-500" },
                 [it.name || it.initials, it.date ? 'exam ' + it.date : '', it.complaint].filter(Boolean).join(' · '))),
             React.createElement("div", { className: "text-right text-xs text-gray-500 whitespace-nowrap" },
               React.createElement("div", null, 'saved ' + fmtExamTime(it.savedAt)),
-              React.createElement("div", null, [it.inBrowser ? 'browser' : null, it.inFolder ? 'folder' : null].filter(Boolean).join(' + ')),
+              React.createElement("div", null, [it.inBrowser ? 'this device' : null, it.inDrive ? 'Drive' : null, it.inFolder ? 'folder' : null].filter(Boolean).join(' + ')),
               it.key === currentKey && React.createElement("div", { className: "text-blue-600 font-bold" }, "open now")))))));
 };
 // ===================================================================
@@ -4815,6 +5020,9 @@ const BiomechanicsExam = () => {
   const [saveState, setSaveState] = useState({ status: 'idle', browserAt: null, folderAt: null, error: '' });
   const [folder, setFolder] = useState({ supported: ExamStore.folderSupported, handle: null, name: '', perm: 'none' });
   const [openPanel, setOpenPanel] = useState(null);
+  const [drive, setDrive] = useState({ configured: ExamDrive.configured(), enabled: false, connected: ExamDrive.connected() });
+  const driveRef = React.useRef(drive);
+  driveRef.current = drive;
   const formRef = React.useRef(formData);
   const selRef = React.useRef(selectedExams);
   const keyRef = React.useRef(examKey);
@@ -4884,6 +5092,63 @@ const BiomechanicsExam = () => {
           setSaveState(s => ({ ...s, error: lost ? 'Folder access lost — click Reconnect folder (saved in browser)' : 'Folder save failed (' + ((err && err.name) || 'error') + ') — saved in browser' }));
         });
     }
+    const dr = driveRef.current;
+    if (id && hasData && dr.connected) {
+      ExamDrive.writeExam(rec, baseSavedAtRef.current)
+        .then(at => {
+          baseSavedAtRef.current = at;
+          ExamStore.markFolderSaved(rec.key, at, 'driveSavedAt').catch(() => {});
+          setSaveState(s => ({ ...s, driveAt: at, error: '' }));
+        })
+        .catch(err => {
+          console.error('Drive save failed', err);
+          if (err && err.auth) {
+            setDrive(d => ({ ...d, connected: false }));
+            setSaveState(s => ({ ...s, error: 'Google sign-in expired — tap Reconnect Drive (saved on this device)' }));
+          } else {
+            setSaveState(s => ({ ...s, error: 'Drive save failed (' + ((err && err.message) || 'error') + ') — saved on this device' }));
+          }
+        });
+    }
+  };
+
+  // Write every exam that has a GUID but isn't in Drive yet (e.g. saved while signed out).
+  const syncPendingToDrive = async () => {
+    try {
+      const all = await ExamStore.listExams();
+      for (const r of all) {
+        if (!r.examId || r.driveSavedAt === r.savedAt || !ExamStore.hasExamData(r.data, initialData)) continue;
+        if (r.key === keyRef.current) continue;
+        try {
+          const at = await ExamDrive.writeExam(r, r.driveSavedAt || null);
+          await ExamStore.markFolderSaved(r.key, at, 'driveSavedAt');
+        } catch (e) { console.error('Drive sync failed for', r.examId, e); if (e && e.auth) return; }
+      }
+    } catch (e) { console.error('Drive sync failed', e); }
+  };
+
+  const connectDrive = () => {
+    const d = driveRef.current;
+    if (d.connected) {
+      alert('Each exam with a Client GUID saves to the "' + DRIVE_FOLDER_NAME + '" folder in your Google Drive. You can move that folder anywhere in Drive.');
+      return;
+    }
+    ExamDrive.connect()
+      .then(async () => {
+        await ExamStore.setSetting('driveEnabled', true).catch(() => {});
+        await ExamDrive.ensureFolder();
+        const next = { ...driveRef.current, enabled: true, connected: true };
+        driveRef.current = next;
+        setDrive(next);
+        setSaveState(s => ({ ...s, error: '' }));
+        lastJsonRef.current = '';
+        doSave();
+        syncPendingToDrive();
+      })
+      .catch(err => {
+        console.error('Drive connect failed', err);
+        setSaveState(s => ({ ...s, error: 'Could not connect Google Drive (' + ((err && err.message) || 'error') + ')' }));
+      });
   };
 
   // Write every exam that has a GUID but isn't in the folder yet (e.g. saved while disconnected).
@@ -4978,6 +5243,17 @@ const BiomechanicsExam = () => {
         lastJsonRef.current = snapshotJson();
         if (!handoff) applyStartupBridges();
       }
+      // Ask the browser to keep this site's saved data (helps on iPad Safari).
+      try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) { /* ignore */ }
+      // Restore Google Drive (sign-in lasts about an hour; after that one tap on Reconnect Drive).
+      try {
+        if (ExamDrive.configured()) {
+          const enabled = !!(await ExamStore.getSetting('driveEnabled').catch(() => false));
+          const conn = ExamDrive.connected();
+          if (!cancelled) setDrive(d => ({ ...d, enabled, connected: enabled && conn }));
+          if (enabled && conn) syncPendingToDrive();
+        }
+      } catch (e) { console.error('Drive restore error', e); }
       // Restore the save folder (permission is re-granted with one click after a browser restart).
       try {
         const h = await ExamStore.getSetting('dirHandle');
@@ -5050,6 +5326,12 @@ const BiomechanicsExam = () => {
       const fromFolder = await ExamStore.readFolderExam(f.handle, id).catch(() => null);
       if (fromFolder && (!existing || fromFolder.savedAt > existing.savedAt)) {
         existing = { ...fromFolder, data: { ...(existing ? existing.data : {}), ...fromFolder.data } };
+      }
+    }
+    if (driveRef.current.connected) {
+      const fromDrive = await ExamDrive.readExam(id).catch(() => null);
+      if (fromDrive && (!existing || fromDrive.savedAt > existing.savedAt)) {
+        existing = { ...fromDrive, data: { ...(existing ? existing.data : {}), ...fromDrive.data } };
       }
     }
     if (id !== ExamStore.sanitizeKey(formRef.current.clientId)) return; // field changed while checking
@@ -5136,17 +5418,23 @@ const BiomechanicsExam = () => {
     const f = folderRef.current;
     if (f.handle && f.perm === 'granted') {
       try { (await ExamStore.listFolderExams(f.handle)).forEach(r => add(r, 'folder')); } catch (e) { note = 'Could not read the save folder.'; }
-    } else if (f.supported) {
+    } else if (f.supported && !driveRef.current.connected) {
       note = f.handle ? 'Click Reconnect folder to include exams saved in your folder.' : 'Choose a save folder to include exams saved there.';
     }
+    if (driveRef.current.connected) {
+      try { (await ExamDrive.listExams()).forEach(r => add(r, 'drive')); } catch (e) { note = 'Could not read Google Drive' + (e && e.auth ? ' — tap Reconnect Drive.' : '.'); }
+    } else if (driveRef.current.configured && driveRef.current.enabled) {
+      note = 'Tap Reconnect Drive to include exams saved in Google Drive.';
+    }
     const items = Object.values(map).map(m => {
-      const b = m.recs.browser, fo = m.recs.folder;
+      const b = m.recs.browser, fl = m.recs.folder, dv = m.recs.drive;
+      const fo = fl && dv ? (dv.savedAt > fl.savedAt ? dv : fl) : (fl || dv);
       const newest = b && fo ? (fo.savedAt > b.savedAt ? fo : b) : (b || fo);
       const d = newest.data || {};
       return {
         id: m.id, key: (b && b.key) || newest.key, examId: newest.examId, savedAt: newest.savedAt,
         initials: d.initials || (b && b.data.initials), name: b && (b.data.fullName || b.data._intakeName),
-        date: d.date, complaint: d.primaryComplaint, inBrowser: !!b, inFolder: !!fo, browser: b, folder: fo
+        date: d.date, complaint: d.primaryComplaint, inBrowser: !!b, inFolder: !!fl, inDrive: !!dv, browser: b, folder: fo
       };
     }).filter(it => ExamStore.hasExamData((it.browser || it.folder).data, initialData) || it.key === keyRef.current)
       .sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''));
@@ -5848,9 +6136,11 @@ const BiomechanicsExam = () => {
   }, "New exam"))), /*#__PURE__*/React.createElement(ExamSaveBar, {
     saveState: saveState,
     folder: folder,
+    drive: drive,
     committedId: committedId,
     hasData: ExamStore.hasExamData(formData, initialData),
     onFolder: chooseFolder,
+    onDrive: connectDrive,
     onOpen: showOpenPanel
   })), /*#__PURE__*/React.createElement("div", {
     className: "max-w-3xl mx-auto p-4 md:p-6"

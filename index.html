@@ -4406,12 +4406,12 @@ const ExamSaveBar = ({ saveState, folder, committedId, hasData, onFolder, onOpen
   else if (!saveState.browserAt) { tone = 'text-gray-400'; text = 'Autosave on — nothing entered yet'; }
   else if (committedId && folder.perm === 'granted' && hasData && saveState.folderAt === saveState.browserAt) { text = '✓ Saved to folder ' + t; }
   else if (committedId && folder.perm === 'granted' && hasData) { tone = 'text-gray-300'; text = 'Saved in browser ' + t + ' · writing to folder…'; }
-  else if (!committedId) { tone = 'text-amber-200'; text = 'Saved in browser ' + t + ' · add the Client GUID to save to your folder'; }
   else if (!folder.supported) { tone = 'text-amber-200'; text = 'Saved in browser ' + t + ' · folder saving needs Chrome or Edge'; }
+  else if (!committedId) { tone = 'text-amber-200'; text = 'Saved in browser ' + t + ' · add the Client GUID to save to your folder'; }
   else if (!folder.handle) { tone = 'text-amber-200'; text = 'Saved in browser ' + t + ' · choose a save folder'; }
   else if (folder.perm !== 'granted') { tone = 'text-amber-200'; text = 'Saved in browser ' + t + ' · click Reconnect folder'; }
   else { text = '✓ Saved in browser ' + t; }
-  const folderLabel = !folder.supported ? null
+  const folderLabel = !folder.supported ? 'Choose save folder'
     : !folder.handle ? 'Choose save folder'
     : folder.perm !== 'granted' ? 'Reconnect folder'
     : '📁 ' + (folder.name || 'Folder');
@@ -4420,9 +4420,9 @@ const ExamSaveBar = ({ saveState, folder, committedId, hasData, onFolder, onOpen
     React.createElement("div", { className: "text-xs font-medium " + tone, "data-testid": "save-status" }, text),
     React.createElement("div", { className: "flex items-center gap-2" },
       folderLabel && React.createElement("button", {
-        onClick: onFolder,
+        onClick: folder.supported ? onFolder : () => alert('Saving to a folder works in Google Chrome or Microsoft Edge on a computer.\n\nThis browser (for example Safari or an iPad) still saves every entry in this browser. Open this page in Chrome on your Mac to choose your Google Drive folder.'),
         title: folder.perm === 'granted' ? 'Saving exams to this folder. Click to choose a different folder.' : 'Pick the folder (inside Google Drive) where each exam is saved as <GUID>.json',
-        className: btn + ' ' + (folder.handle && folder.perm !== 'granted' ? 'bg-amber-600 hover:bg-amber-500 text-white font-bold' : 'bg-slate-800 hover:bg-slate-700')
+        className: btn + ' ' + (folder.supported && folder.perm === 'granted' ? 'bg-slate-800 hover:bg-slate-700' : folder.handle && folder.supported ? 'bg-amber-600 hover:bg-amber-500 text-white font-bold' : 'bg-blue-600 hover:bg-blue-500 text-white font-bold')
       }, folderLabel),
       React.createElement("button", { onClick: onOpen, className: btn + ' bg-slate-800 hover:bg-slate-700' }, "Open exam")));
 };

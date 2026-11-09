@@ -4183,6 +4183,286 @@ function ConsolidatedFindingsBlock({ formData, selectedExams }) {
   );
 }
 
+// ===================================================================
+// BUILD exam autosave (schema v10)
+// Every change is saved within a second to this browser (IndexedDB plus a
+// localStorage mirror) and, once a save folder is chosen, to one JSON file
+// per exam GUID in that folder (e.g. a folder inside Google Drive for Desktop).
+// Older saved data is migrated forward, never discarded.
+// ===================================================================
+const EXAM_SCHEMA_VERSION = 'v10';
+const EXAM_LS_CURRENT = 'bioExam.v10.currentKey';
+const EXAM_LS_MIRROR = 'bioExam.v10.mirror.';
+const EXAM_LS_LEGACY_DONE = 'bioExam.v10.legacyImported';
+// Kept in this browser only; never written to folder files.
+const EXAM_PRIVATE_FIELDS = ['fullName', '_intakeName'];
+// Fields that don't count as exam findings when deciding if a form is empty.
+const EXAM_IDENTITY_FIELDS = ['date', 'clientSex', 'clientId', 'fullName', 'initials', '_intakeName'];
+
+const ExamStore = (() => {
+  let dbPromise = null;
+  const lastWritten = {}; // file name -> savedAt this session wrote
+  let folderChain = Promise.resolve();
+
+  function openDB() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject) => {
+      if (!window.indexedDB) { reject(new Error('IndexedDB unavailable')); return; }
+      const req = indexedDB.open('buildClinicalExam', 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('exams')) db.createObjectStore('exams', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings');
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    dbPromise.catch(() => { dbPromise = null; });
+    return dbPromise;
+  }
+  function run(store, mode, fn) {
+    return openDB().then(db => new Promise((resolve, reject) => {
+      const t = db.transaction(store, mode);
+      const s = t.objectStore(store);
+      let out;
+      const r = fn(s, v => { out = v; });
+      if (r && typeof r === 'object' && 'onsuccess' in r) r.onsuccess = () => { out = r.result; };
+      t.oncomplete = () => resolve(out);
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error || new Error('transaction aborted'));
+    }));
+  }
+
+  const sanitizeKey = raw => String(raw == null ? '' : raw).trim().replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '').slice(0, 120);
+  const newGuid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });
+  const newDraftKey = () => 'draft-' + newGuid();
+  const isDraftKey = k => typeof k === 'string' && k.indexOf('draft-') === 0;
+
+  // Migrate any older saved shape forward: defaults first, saved values win, unknown fields kept.
+  function migrate(raw, defaults) {
+    const base = { ...defaults };
+    if (!raw || typeof raw !== 'object') return base;
+    return { ...base, ...raw };
+  }
+  function hasExamData(data, defaults) {
+    if (!data) return false;
+    for (const k of Object.keys(data)) {
+      if (EXAM_IDENTITY_FIELDS.indexOf(k) >= 0 || k.charAt(0) === '_') continue;
+      const v = data[k];
+      if (v == null || v === '' || v === false) continue;
+      if (Array.isArray(v) && v.length === 0) continue;
+      const d = defaults ? defaults[k] : undefined;
+      if (v === d) continue;
+      if (typeof v === 'object' && JSON.stringify(v) === JSON.stringify(d)) continue;
+      return true;
+    }
+    return false;
+  }
+  function stripPrivate(data) {
+    const out = { ...data };
+    EXAM_PRIVATE_FIELDS.forEach(f => { delete out[f]; });
+    return out;
+  }
+
+  // ----- browser copy -----
+  const getExam = key => run('exams', 'readonly', s => s.get(key));
+  const putExam = rec => run('exams', 'readwrite', s => { s.put(rec); });
+  const deleteExam = key => run('exams', 'readwrite', s => { s.delete(key); });
+  const listExams = () => run('exams', 'readonly', s => s.getAll());
+  const getSetting = k => run('settings', 'readonly', s => s.get(k));
+  const setSetting = (k, v) => run('settings', 'readwrite', s => { s.put(v, k); });
+  // Record that the folder holds this exact version (only if nothing newer was saved since).
+  const markFolderSaved = (key, savedAt) => run('exams', 'readwrite', s => {
+    const g = s.get(key);
+    g.onsuccess = () => { const r = g.result; if (r && r.savedAt === savedAt) { r.folderSavedAt = savedAt; s.put(r); } };
+  });
+  function writeMirror(rec) {
+    try {
+      const keep = EXAM_LS_MIRROR + rec.key;
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf(EXAM_LS_MIRROR) === 0 && k !== keep) localStorage.removeItem(k);
+      }
+      localStorage.setItem(keep, JSON.stringify(rec));
+      localStorage.setItem(EXAM_LS_CURRENT, rec.key);
+    } catch (e) { /* quota or private mode: IndexedDB copy still saves */ }
+  }
+  function readMirror(key) {
+    try { const raw = localStorage.getItem(EXAM_LS_MIRROR + key); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+  }
+
+  // ----- folder (File System Access API: Chrome / Edge) -----
+  const folderSupported = typeof window.showDirectoryPicker === 'function';
+  async function permission(handle, ask) {
+    if (!handle || !handle.queryPermission) return 'none';
+    const opts = { mode: 'readwrite' };
+    let p = await handle.queryPermission(opts);
+    if (p !== 'granted' && ask) p = await handle.requestPermission(opts);
+    return p;
+  }
+  async function pickFolder() {
+    const h = await window.showDirectoryPicker({ id: 'build-clinical-exam', mode: 'readwrite' });
+    await setSetting('dirHandle', h);
+    return h;
+  }
+  const fileNameFor = examId => sanitizeKey(examId) + '.json';
+  function toFileRecord(rec) {
+    return {
+      app: 'BUILD Clinical Exam',
+      schemaVersion: EXAM_SCHEMA_VERSION,
+      examId: rec.examId,
+      savedAt: rec.savedAt,
+      selectedExams: rec.selectedExams || null,
+      data: stripPrivate(rec.data || {})
+    };
+  }
+  async function readFile(dir, name) {
+    try {
+      const fh = await dir.getFileHandle(name);
+      const text = await (await fh.getFile()).text();
+      return { text, json: JSON.parse(text) };
+    } catch (e) { return null; }
+  }
+  async function writeText(dir, name, text) {
+    const fh = await dir.getFileHandle(name, { create: true });
+    const w = await fh.createWritable();
+    await w.write(text);
+    await w.close();
+  }
+  // Writes are queued one at a time. If the file changed somewhere else since this
+  // exam was opened (another computer), the old file is kept as a .backup copy first.
+  function writeExamFile(dir, rec, knownSavedAt) {
+    const job = folderChain.then(async () => {
+      const name = fileNameFor(rec.examId);
+      const existing = await readFile(dir, name);
+      const prev = existing && existing.json && existing.json.savedAt;
+      if (prev && prev !== lastWritten[name] && (!knownSavedAt || prev > knownSavedAt) && prev !== rec.savedAt) {
+        await writeText(dir, name.replace(/\.json$/, '') + '.backup-' + prev.replace(/[:.]/g, '-') + '.json', existing.text);
+      }
+      await writeText(dir, name, JSON.stringify(toFileRecord(rec), null, 2));
+      lastWritten[name] = rec.savedAt;
+      return rec.savedAt;
+    });
+    folderChain = job.catch(() => {});
+    return job;
+  }
+  async function readFolderExam(dir, examId) {
+    const f = await readFile(dir, fileNameFor(examId));
+    if (!f || !f.json || !f.json.data) return null;
+    return fromFileRecord(f.json);
+  }
+  function fromFileRecord(j) {
+    const id = sanitizeKey(j.examId || (j.data && j.data.clientId) || '');
+    return { key: id, examId: id, savedAt: j.savedAt || '', schemaVersion: j.schemaVersion, data: j.data || {}, selectedExams: j.selectedExams || null, folderSavedAt: j.savedAt || '', fromFolder: true };
+  }
+  async function listFolderExams(dir) {
+    const out = [];
+    for await (const [name, h] of dir.entries()) {
+      if (h.kind !== 'file' || !/\.json$/i.test(name) || name.indexOf('.backup-') >= 0) continue;
+      try {
+        const j = JSON.parse(await (await h.getFile()).text());
+        if (j && j.app === 'BUILD Clinical Exam' && j.data) out.push(fromFileRecord(j));
+      } catch (e) { /* not an exam file */ }
+    }
+    return out;
+  }
+
+  return {
+    sanitizeKey, newGuid, newDraftKey, isDraftKey, migrate, hasExamData, stripPrivate,
+    getExam, putExam, deleteExam, listExams, getSetting, setSetting, markFolderSaved,
+    writeMirror, readMirror, folderSupported, permission, pickFolder, writeExamFile,
+    readFolderExam, listFolderExams, toFileRecord
+  };
+})();
+
+// Reads the Client Profile hand-off (if the page was launched with one).
+function readExamHandoff() {
+  try {
+    if (window.BUILDHandoff && BUILDHandoff.readRecord) return BUILDHandoff.readRecord();
+    const h = (location.hash || '').replace(/^#/, '');
+    const m = h.split('&').find(kv => kv.indexOf('profile=') === 0);
+    if (!m) return null;
+    return JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m.slice(8))))));
+  } catch (e) { return null; }
+}
+
+const fmtExamTime = iso => {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    const sameDay = d.toDateString() === new Date().toDateString();
+    return sameDay ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch (e) { return iso; }
+};
+
+// Small status bar under the header: save state + folder / open / download.
+const ExamSaveBar = ({ saveState, folder, committedId, hasData, onFolder, onOpen }) => {
+  let tone = 'text-emerald-300', text;
+  const t = saveState.browserAt ? fmtExamTime(saveState.browserAt) : '';
+  if (saveState.status === 'pending') { tone = 'text-gray-300'; text = 'Saving…'; }
+  else if (saveState.error) { tone = 'text-amber-300'; text = '⚠ ' + saveState.error; }
+  else if (!saveState.browserAt) { tone = 'text-gray-400'; text = 'Autosave on — nothing entered yet'; }
+  else if (committedId && folder.perm === 'granted' && hasData && saveState.folderAt === saveState.browserAt) { text = '✓ Saved to folder ' + t; }
+  else if (committedId && folder.perm === 'granted' && hasData) { tone = 'text-gray-300'; text = 'Saved in browser ' + t + ' · writing to folder…'; }
+  else if (!committedId) { tone = 'text-amber-200'; text = 'Saved in browser ' + t + ' · add the Client GUID to save to your folder'; }
+  else if (!folder.supported) { tone = 'text-amber-200'; text = 'Saved in browser ' + t + ' · folder saving needs Chrome or Edge'; }
+  else if (!folder.handle) { tone = 'text-amber-200'; text = 'Saved in browser ' + t + ' · choose a save folder'; }
+  else if (folder.perm !== 'granted') { tone = 'text-amber-200'; text = 'Saved in browser ' + t + ' · click Reconnect folder'; }
+  else { text = '✓ Saved in browser ' + t; }
+  const folderLabel = !folder.supported ? null
+    : !folder.handle ? 'Choose save folder'
+    : folder.perm !== 'granted' ? 'Reconnect folder'
+    : '📁 ' + (folder.name || 'Folder');
+  const btn = 'text-xs px-3 py-1 rounded transition-colors';
+  return React.createElement("div", { className: "max-w-3xl mx-auto mt-3 flex flex-wrap items-center gap-2 justify-between" },
+    React.createElement("div", { className: "text-xs font-medium " + tone, "data-testid": "save-status" }, text),
+    React.createElement("div", { className: "flex items-center gap-2" },
+      folderLabel && React.createElement("button", {
+        onClick: onFolder,
+        title: folder.perm === 'granted' ? 'Saving exams to this folder. Click to choose a different folder.' : 'Pick the folder (inside Google Drive) where each exam is saved as <GUID>.json',
+        className: btn + ' ' + (folder.handle && folder.perm !== 'granted' ? 'bg-amber-600 hover:bg-amber-500 text-white font-bold' : 'bg-slate-800 hover:bg-slate-700')
+      }, folderLabel),
+      React.createElement("button", { onClick: onOpen, className: btn + ' bg-slate-800 hover:bg-slate-700' }, "Open exam")));
+};
+
+// List of saved exams (this browser + the save folder) to reopen.
+const ExamOpenPanel = ({ panel, currentKey, onPick, onClose, onDownload }) => {
+  const [q, setQ] = useState('');
+  const items = (panel.items || []).filter(it => {
+    if (!q.trim()) return true;
+    const s = q.trim().toLowerCase();
+    return [it.examId, it.initials, it.name, it.date].some(v => v && String(v).toLowerCase().indexOf(s) >= 0);
+  });
+  return React.createElement("div", { className: "fixed inset-0 z-[60] bg-black/50 flex items-start justify-center p-4 no-print", onClick: onClose },
+    React.createElement("div", { className: "bg-white rounded-lg shadow-2xl w-full max-w-2xl mt-16 max-h-[80vh] flex flex-col", onClick: e => e.stopPropagation() },
+      React.createElement("div", { className: "p-4 border-b flex items-center gap-3" },
+        React.createElement("h2", { className: "font-bold text-slate-800 text-lg flex-1" }, "Open a saved exam"),
+        React.createElement("button", { onClick: onDownload, className: "text-xs px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-slate-700" }, "Download current as file"),
+        React.createElement("button", { onClick: onClose, className: "text-xs px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-slate-700" }, "Close")),
+      React.createElement("div", { className: "p-4 border-b" },
+        React.createElement("input", { autoFocus: true, value: q, onChange: e => setQ(e.target.value), placeholder: "Search by GUID, initials or date", className: "w-full p-2 bg-gray-50 rounded border border-gray-200" }),
+        panel.note && React.createElement("p", { className: "text-xs text-amber-700 mt-2" }, panel.note)),
+      React.createElement("div", { className: "overflow-y-auto flex-1" },
+        panel.loading ? React.createElement("p", { className: "p-4 text-gray-500" }, "Loading…")
+        : items.length === 0 ? React.createElement("p", { className: "p-4 text-gray-500" }, "No saved exams found.")
+        : items.map(it => React.createElement("button", {
+            key: it.id, onClick: () => onPick(it),
+            className: "w-full text-left px-4 py-3 border-b hover:bg-blue-50 flex items-center gap-3 " + (it.key === currentKey ? 'bg-blue-50' : '')
+          },
+            React.createElement("div", { className: "flex-1 min-w-0" },
+              React.createElement("div", { className: "font-mono text-sm text-slate-800 truncate" }, it.examId || 'No GUID yet (browser only)'),
+              React.createElement("div", { className: "text-xs text-gray-500" },
+                [it.name || it.initials, it.date ? 'exam ' + it.date : '', it.complaint].filter(Boolean).join(' · '))),
+            React.createElement("div", { className: "text-right text-xs text-gray-500 whitespace-nowrap" },
+              React.createElement("div", null, 'saved ' + fmtExamTime(it.savedAt)),
+              React.createElement("div", null, [it.inBrowser ? 'browser' : null, it.inFolder ? 'folder' : null].filter(Boolean).join(' + ')),
+              it.key === currentKey && React.createElement("div", { className: "text-blue-600 font-bold" }, "open now")))))));
+};
+// ===================================================================
+
+
 const BiomechanicsExam = () => {
   const [mode, setMode] = useState('edit');
   const [postureView, setPostureView] = useState('anterior');
@@ -4528,27 +4808,101 @@ const BiomechanicsExam = () => {
     knee_other_notes: ''
   };
   const [formData, setFormData] = useState(initialData);
-  useEffect(() => {
-    const SCHEMA_VERSION = 'v9'; // bump when initialData shape changes
-    const savedRaw = localStorage.getItem('bioExamData');
-    const savedVersion = localStorage.getItem('bioExamDataVersion');
-    if (savedRaw && savedVersion === SCHEMA_VERSION) {
-      try {
-        // Merge: new fields get initialData defaults, saved fields are restored
-        setFormData({
-          ...initialData,
-          ...JSON.parse(savedRaw)
-        });
-      } catch (e) {
-        console.error('Load error', e);
-      }
-    } else {
-      // Schema changed or first load — discard stale data, start fresh
-      localStorage.removeItem('bioExamData');
-      localStorage.setItem('bioExamDataVersion', SCHEMA_VERSION);
-    }
+  // ── Autosave state (schema v10) ──
+  const [examLoaded, setExamLoaded] = useState(false);
+  const [examKey, setExamKey] = useState(null); // storage key: draft-… until a GUID is set, then the GUID
+  const [committedId, setCommittedId] = useState(''); // GUID that names the folder file
+  const [saveState, setSaveState] = useState({ status: 'idle', browserAt: null, folderAt: null, error: '' });
+  const [folder, setFolder] = useState({ supported: ExamStore.folderSupported, handle: null, name: '', perm: 'none' });
+  const [openPanel, setOpenPanel] = useState(null);
+  const formRef = React.useRef(formData);
+  const selRef = React.useRef(selectedExams);
+  const keyRef = React.useRef(examKey);
+  const idRef = React.useRef(committedId);
+  const folderRef = React.useRef(folder);
+  const baseSavedAtRef = React.useRef(null); // savedAt of the version this exam was opened from
+  const lastJsonRef = React.useRef('');
+  const saveTimerRef = React.useRef(null);
+  formRef.current = formData;
+  selRef.current = selectedExams;
+  keyRef.current = examKey;
+  idRef.current = committedId;
+  folderRef.current = folder;
+  const snapshotJson = () => JSON.stringify([formRef.current, selRef.current, idRef.current, keyRef.current]);
 
-    // ── On load: check localStorage bridge from Rider Intake ──
+  const applyRecord = rec => {
+    const data = ExamStore.migrate(rec.data, initialData);
+    formRef.current = data;
+    setFormData(data);
+    setExamKey(rec.key);
+    keyRef.current = rec.key;
+    setCommittedId(rec.examId || '');
+    idRef.current = rec.examId || '';
+    if (rec.selectedExams) {
+      setSelectedExams(rec.selectedExams);
+      selRef.current = rec.selectedExams;
+      try { localStorage.setItem(SELECTED_EXAMS_KEY, JSON.stringify(rec.selectedExams)); } catch (e) { /* ignore */ }
+    }
+    baseSavedAtRef.current = rec.savedAt || null;
+    lastJsonRef.current = snapshotJson();
+    try { localStorage.setItem(EXAM_LS_CURRENT, rec.key); } catch (e) { /* ignore */ }
+    setSaveState({ status: 'idle', browserAt: rec.fromFolder ? null : (rec.savedAt || null), folderAt: rec.folderSavedAt || null, error: '' });
+  };
+
+  // Save now: browser copy always; folder copy once there is a GUID and real exam data.
+  const doSave = () => {
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+    const key = keyRef.current;
+    if (!key) return;
+    const data = formRef.current;
+    const id = idRef.current;
+    const hasData = ExamStore.hasExamData(data, initialData);
+    const hasIdentity = !!(data.fullName || data.initials || data.clientId || data.primaryComplaint);
+    lastJsonRef.current = snapshotJson();
+    if (!hasData && !hasIdentity) { setSaveState(s => ({ ...s, status: 'idle' })); return; }
+    const rec = {
+      key, examId: id || null, savedAt: new Date().toISOString(), schemaVersion: EXAM_SCHEMA_VERSION,
+      data, selectedExams: selRef.current, folderSavedAt: null
+    };
+    ExamStore.writeMirror(rec);
+    ExamStore.putExam(rec)
+      .then(() => setSaveState(s => ({ ...s, status: 'idle', browserAt: rec.savedAt, error: s.error && s.error.indexOf('browser') >= 0 ? '' : s.error })))
+      .catch(() => setSaveState(s => ({ ...s, status: 'idle', browserAt: rec.savedAt, error: 'Browser database unavailable — kept a backup copy in this browser' })));
+    const f = folderRef.current;
+    if (id && hasData && f.handle && f.perm === 'granted') {
+      ExamStore.writeExamFile(f.handle, rec, baseSavedAtRef.current)
+        .then(at => {
+          baseSavedAtRef.current = at;
+          ExamStore.markFolderSaved(rec.key, at).catch(() => {});
+          setSaveState(s => ({ ...s, folderAt: at, error: '' }));
+        })
+        .catch(err => {
+          console.error('Folder save failed', err);
+          const lost = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+          if (lost) setFolder(fo => ({ ...fo, perm: 'prompt' }));
+          setSaveState(s => ({ ...s, error: lost ? 'Folder access lost — click Reconnect folder (saved in browser)' : 'Folder save failed (' + ((err && err.name) || 'error') + ') — saved in browser' }));
+        });
+    }
+  };
+
+  // Write every exam that has a GUID but isn't in the folder yet (e.g. saved while disconnected).
+  const syncPendingToFolder = async handle => {
+    try {
+      const all = await ExamStore.listExams();
+      for (const r of all) {
+        if (!r.examId || r.folderSavedAt === r.savedAt || !ExamStore.hasExamData(r.data, initialData)) continue;
+        if (r.key === keyRef.current) continue; // current exam is written by doSave
+        try {
+          const at = await ExamStore.writeExamFile(handle, r, r.folderSavedAt || null);
+          await ExamStore.markFolderSaved(r.key, at);
+        } catch (e) { console.error('Folder sync failed for', r.examId, e); }
+      }
+    } catch (e) { console.error('Folder sync failed', e); }
+  };
+
+  const applyStartupBridges = () => {
+    // ── Rider Intake bridge (only onto a fresh exam, never over a restored one) ──
     const intakeRaw = localStorage.getItem('bbf_bio_intake');
     if (intakeRaw) {
       try {
@@ -4564,19 +4918,82 @@ const BiomechanicsExam = () => {
         console.error('Intake load error', e);
       }
     }
-
-    // ── On load: read shoe data from Shoe-RX localStorage bridge ──
+    // ── Shoe-RX bridge ──
     const shoeRaw = localStorage.getItem('bbf_shoe_rx');
     if (shoeRaw) {
       try {
-        const s = JSON.parse(shoeRaw);
-        applyShoeRxData(s, setFormData);
+        applyShoeRxData(JSON.parse(shoeRaw), setFormData);
       } catch (e) {
         console.error('Shoe load error', e);
       }
     }
+  };
 
-    // ── Live: listen for postMessage from Rider Intake or Shoe-RX ──
+  // ── On load: restore the last exam (or the hand-off client's exam), migrating old data forward ──
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // One-time rescue of the old single-slot save ('bioExamData'), whatever version it was stamped with.
+      try {
+        if (!localStorage.getItem(EXAM_LS_LEGACY_DONE)) {
+          const legacyRaw = localStorage.getItem('bioExamData');
+          if (legacyRaw) {
+            const data = ExamStore.migrate(JSON.parse(legacyRaw), initialData);
+            if (ExamStore.hasExamData(data, initialData)) {
+              const id = ExamStore.sanitizeKey(data.clientId);
+              let key = id || ExamStore.newDraftKey();
+              const clash = id ? await ExamStore.getExam(id).catch(() => null) : null;
+              if (clash) key = ExamStore.newDraftKey();
+              const rec = { key, examId: (id && !clash) ? id : null, savedAt: new Date().toISOString(), schemaVersion: EXAM_SCHEMA_VERSION, data, selectedExams: null, folderSavedAt: null, recovered: true };
+              await ExamStore.putExam(rec);
+              if (!localStorage.getItem(EXAM_LS_CURRENT)) localStorage.setItem(EXAM_LS_CURRENT, key);
+            }
+          }
+          localStorage.setItem(EXAM_LS_LEGACY_DONE, new Date().toISOString());
+        }
+      } catch (e) { console.error('Legacy import error', e); }
+
+      let rec = null;
+      const handoff = readExamHandoff();
+      if (handoff) {
+        // Launched from Client Profile: open that client's saved exam if there is one, otherwise start fresh.
+        const id = ExamStore.sanitizeKey(handoff.janeId || '');
+        if (id) rec = await ExamStore.getExam(id).catch(() => null);
+      } else {
+        let cur = null;
+        try { cur = localStorage.getItem(EXAM_LS_CURRENT); } catch (e) { /* ignore */ }
+        if (cur) {
+          const fromDb = await ExamStore.getExam(cur).catch(() => null);
+          const fromMirror = ExamStore.readMirror(cur);
+          rec = fromDb && fromMirror ? (fromMirror.savedAt > fromDb.savedAt ? fromMirror : fromDb) : (fromDb || fromMirror);
+        }
+      }
+      if (cancelled) return;
+      if (rec) {
+        applyRecord(rec);
+      } else {
+        const key = ExamStore.newDraftKey();
+        setExamKey(key);
+        keyRef.current = key;
+        lastJsonRef.current = snapshotJson();
+        if (!handoff) applyStartupBridges();
+      }
+      // Restore the save folder (permission is re-granted with one click after a browser restart).
+      try {
+        const h = await ExamStore.getSetting('dirHandle');
+        if (h && !cancelled) {
+          const perm = await ExamStore.permission(h, false);
+          setFolder(fo => ({ ...fo, handle: h, name: h.name, perm }));
+          if (perm === 'granted') syncPendingToFolder(h);
+        }
+      } catch (e) { console.error('Folder restore error', e); }
+      if (!cancelled) setExamLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Live: listen for postMessage from Rider Intake or Shoe-RX ──
+  useEffect(() => {
     const handleMsg = e => {
       if (!e.data) return;
       if (e.data.type === 'BIO_INTAKE' && e.data.profile) {
@@ -4592,49 +5009,213 @@ const BiomechanicsExam = () => {
       }
       if (e.data.type === 'SHOE_RX_SELECTION' && e.data.shoe) {
         const s = e.data.shoe;
-        setFormData(prev => ({
-          ...prev,
-          ...(s.brand ? {
-            shoe_brand: s.brand
-          } : {}),
-          ...(s.model ? {
-            shoe_model: s.model
-          } : {}),
-          ...(s.size ? {
-            shoe_size: s.size
-          } : {}),
-          ...(s.drop ? {
-            shoe_drop: s.drop
-          } : {}),
-          ...(s.midsole ? {
-            shoe_midsole: s.midsole
-          } : {}),
-          ...(s.category ? {
-            shoe_category: s.category
-          } : {})
-        }));
+        applyShoeRxData(s, setFormData);
         localStorage.setItem('bbf_shoe_rx', JSON.stringify(s));
       }
     };
     window.addEventListener('message', handleMsg);
     return () => window.removeEventListener('message', handleMsg);
   }, []);
+
+  // ── Autosave: every change, debounced ~0.6 s ──
   useEffect(() => {
-    localStorage.setItem('bioExamData', JSON.stringify(formData));
-    localStorage.setItem('bioExamDataVersion', 'v7');
-  }, [formData]);
+    if (!examLoaded || !examKey) return;
+    if (snapshotJson() === lastJsonRef.current) return;
+    setSaveState(s => ({ ...s, status: 'pending' }));
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(doSave, 600);
+  }, [formData, selectedExams, committedId, examKey, examLoaded]);
+
+  // Flush a pending save when the tab is hidden or closed.
+  useEffect(() => {
+    const flush = () => { if (saveTimerRef.current) doSave(); };
+    const onVis = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('beforeunload', flush);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
+
+  // ── GUID: once entered, it names this exam's file. Never overwrites a different saved exam. ──
+  const commitGuid = async raw => {
+    const id = ExamStore.sanitizeKey(raw);
+    if (!id || id === idRef.current) return;
+    let existing = await ExamStore.getExam(id).catch(() => null);
+    const f = folderRef.current;
+    if (f.handle && f.perm === 'granted') {
+      const fromFolder = await ExamStore.readFolderExam(f.handle, id).catch(() => null);
+      if (fromFolder && (!existing || fromFolder.savedAt > existing.savedAt)) {
+        existing = { ...fromFolder, data: { ...(existing ? existing.data : {}), ...fromFolder.data } };
+      }
+    }
+    if (id !== ExamStore.sanitizeKey(formRef.current.clientId)) return; // field changed while checking
+    if (existing && existing.key !== keyRef.current && ExamStore.hasExamData(existing.data, initialData)) {
+      const curHasData = ExamStore.hasExamData(formRef.current, initialData);
+      const ok = !curHasData || confirm('An exam for ' + id + ' is already saved (last saved ' + fmtExamTime(existing.savedAt) + ').\n\nOK = open that saved exam.\nCancel = keep this form; it will NOT be saved under ' + id + ' until you enter a different GUID.');
+      if (ok) {
+        if (saveTimerRef.current) doSave();
+        const cur = formRef.current;
+        const merged = { ...existing, data: { ...existing.data,
+          fullName: existing.data.fullName || cur.fullName || '',
+          initials: existing.data.initials || cur.initials || '',
+          _intakeName: existing.data._intakeName || cur._intakeName || '' } };
+        applyRecord(merged);
+      } else {
+        setSaveState(s => ({ ...s, error: 'GUID ' + id + ' already has a saved exam — this form is only saved in the browser' }));
+      }
+      return;
+    }
+    const oldKey = keyRef.current;
+    setCommittedId(id);
+    idRef.current = id;
+    setExamKey(id);
+    keyRef.current = id;
+    setSaveState(s => ({ ...s, error: '' }));
+    doSave();
+    if (oldKey && oldKey !== id && ExamStore.isDraftKey(oldKey)) {
+      // The draft now lives under the GUID; remove the draft copy once the GUID copy is stored.
+      setTimeout(() => {
+        ExamStore.getExam(id).then(r => { if (r) ExamStore.deleteExam(oldKey); }).catch(() => {});
+      }, 1500);
+    }
+  };
+  // A GUID filled in by the Client Profile hand-off (not typed) commits on its own.
+  useEffect(() => {
+    if (!examLoaded) return;
+    const id = ExamStore.sanitizeKey(formData.clientId);
+    if (!id || id === committedId) return;
+    const t = setTimeout(() => {
+      const el = document.getElementById('exam-client-guid');
+      if (!el || document.activeElement !== el) commitGuid(formRef.current.clientId);
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [formData.clientId, committedId, examLoaded]);
+
+  const chooseFolder = async () => {
+    const f = folderRef.current;
+    try {
+      let h = f.handle;
+      let perm = f.perm;
+      if (h && perm !== 'granted') {
+        perm = await ExamStore.permission(h, true);
+      } else {
+        h = await ExamStore.pickFolder();
+        perm = await ExamStore.permission(h, true);
+      }
+      const next = { ...f, handle: h, name: h.name, perm };
+      folderRef.current = next;
+      setFolder(next);
+      if (perm === 'granted') {
+        setSaveState(s => ({ ...s, error: '' }));
+        lastJsonRef.current = '';
+        doSave();
+        syncPendingToFolder(h);
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      console.error('Choose folder failed', e);
+      setSaveState(s => ({ ...s, error: 'Could not use that folder (' + ((e && e.name) || 'error') + ')' }));
+    }
+  };
+
+  const showOpenPanel = async () => {
+    if (saveTimerRef.current) doSave();
+    setOpenPanel({ loading: true, items: [] });
+    const map = {};
+    const add = (r, where) => {
+      const id = r.examId || r.key;
+      const m = map[id] || (map[id] = { id, key: r.key, examId: r.examId, recs: {} });
+      m.recs[where] = r;
+    };
+    let note = '';
+    try { (await ExamStore.listExams()).forEach(r => add(r, 'browser')); } catch (e) { note = 'Could not read this browser’s saved exams.'; }
+    const f = folderRef.current;
+    if (f.handle && f.perm === 'granted') {
+      try { (await ExamStore.listFolderExams(f.handle)).forEach(r => add(r, 'folder')); } catch (e) { note = 'Could not read the save folder.'; }
+    } else if (f.supported) {
+      note = f.handle ? 'Click Reconnect folder to include exams saved in your folder.' : 'Choose a save folder to include exams saved there.';
+    }
+    const items = Object.values(map).map(m => {
+      const b = m.recs.browser, fo = m.recs.folder;
+      const newest = b && fo ? (fo.savedAt > b.savedAt ? fo : b) : (b || fo);
+      const d = newest.data || {};
+      return {
+        id: m.id, key: (b && b.key) || newest.key, examId: newest.examId, savedAt: newest.savedAt,
+        initials: d.initials || (b && b.data.initials), name: b && (b.data.fullName || b.data._intakeName),
+        date: d.date, complaint: d.primaryComplaint, inBrowser: !!b, inFolder: !!fo, browser: b, folder: fo
+      };
+    }).filter(it => ExamStore.hasExamData((it.browser || it.folder).data, initialData) || it.key === keyRef.current)
+      .sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''));
+    setOpenPanel({ loading: false, items, note });
+  };
+
+  const pickExam = it => {
+    if (saveTimerRef.current) doSave();
+    const b = it.browser, fo = it.folder;
+    let rec;
+    if (b && fo && fo.savedAt > b.savedAt) {
+      // Folder copy is newer (edited on another computer): use it, keep the name kept in this browser.
+      rec = { ...fo, key: b.key, data: { ...fo.data, fullName: b.data.fullName || '', _intakeName: b.data._intakeName || '' } };
+    } else {
+      rec = b || fo;
+    }
+    applyRecord(rec);
+    if (rec.fromFolder || (fo && b && rec === b && fo.savedAt !== b.savedAt)) {
+      lastJsonRef.current = ''; // store the opened version locally right away
+      setTimeout(doSave, 0);
+    }
+    setOpenPanel(null);
+    setMode('edit');
+    window.scrollTo(0, 0);
+  };
+
+  const downloadCurrent = () => {
+    const rec = { key: keyRef.current, examId: idRef.current || null, savedAt: new Date().toISOString(), data: formRef.current, selectedExams: selRef.current };
+    const blob = new Blob([JSON.stringify(ExamStore.toFileRecord(rec), null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (idRef.current || 'exam-no-guid') + '.json';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  };
+
   const handleChange = (name, value) => {
     setFormData(prev => ({
       ...prev,
       [name]: value
     }));
   };
+  // "New exam" replaces the old Clear button: the current exam stays saved; nothing is deleted.
   const clearForm = () => {
-    if (confirm("Are you sure you want to clear all data?")) {
-      setFormData(initialData);
-      setMode('edit');
-      window.scrollTo(0, 0);
-    }
+    const id = idRef.current;
+    const hasData = ExamStore.hasExamData(formRef.current, initialData);
+    const msg = id ? 'Start a new exam?\n\nThe current exam stays saved under ' + id + '.'
+      : hasData ? 'Start a new exam?\n\nThis exam has no GUID yet, so it stays saved in this browser only. You can reopen it from Open exam.'
+      : 'Start a new exam?';
+    if (!confirm(msg)) return;
+    if (saveTimerRef.current) doSave();
+    const fresh = { ...initialData, date: new Date().toISOString().split('T')[0] };
+    const freshSel = Object.keys(selectedExams).reduce((o, k) => { o[k] = false; return o; }, {});
+    const key = ExamStore.newDraftKey();
+    formRef.current = fresh;
+    selRef.current = freshSel;
+    keyRef.current = key;
+    idRef.current = '';
+    setFormData(fresh);
+    setSelectedExams(freshSel);
+    try { localStorage.setItem(SELECTED_EXAMS_KEY, JSON.stringify(freshSel)); localStorage.setItem(EXAM_LS_CURRENT, key); } catch (e) { /* ignore */ }
+    setExamKey(key);
+    setCommittedId('');
+    baseSavedAtRef.current = null;
+    lastJsonRef.current = snapshotJson();
+    setSaveState({ status: 'idle', browserAt: null, folderAt: null, error: '' });
+    setMode('edit');
+    window.scrollTo(0, 0);
   };
   const toggleSection = sec => {
     setExpandedSections(prev => ({
@@ -4642,6 +5223,12 @@ const BiomechanicsExam = () => {
       [sec]: !prev[sec]
     }));
   };
+
+  if (!examLoaded) {
+    return /*#__PURE__*/React.createElement("div", {
+      className: "min-h-screen flex items-center justify-center text-gray-500"
+    }, "Loading saved exam\u2026");
+  }
 
   // --- VIEW: PREVIEW ---
   if (mode === 'preview') {
@@ -5222,7 +5809,13 @@ const BiomechanicsExam = () => {
   // --- VIEW: EDIT ---
   return /*#__PURE__*/React.createElement("div", {
     className: "min-h-screen bg-gray-50 pb-24"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, openPanel && /*#__PURE__*/React.createElement(ExamOpenPanel, {
+    panel: openPanel,
+    currentKey: examKey,
+    onPick: pickExam,
+    onClose: () => setOpenPanel(null),
+    onDownload: downloadCurrent
+  }), /*#__PURE__*/React.createElement("div", {
     className: "bg-slate-900 text-white p-6 shadow-md sticky top-0 z-50 no-print"
   }, /*#__PURE__*/React.createElement("div", {
     className: "max-w-3xl mx-auto flex justify-between items-center"
@@ -5250,8 +5843,16 @@ const BiomechanicsExam = () => {
     className: `px-3 py-1 rounded-full transition-all ${formData.clientSex === s ? 'bg-blue-500 text-white shadow' : 'text-gray-400 hover:text-white'}`
   }, s === 'female' ? '♀ Female' : '♂ Male'))), /*#__PURE__*/React.createElement("button", {
     onClick: clearForm,
-    className: "text-xs bg-slate-800 px-3 py-1 rounded hover:bg-red-900 transition-colors"
-  }, "Clear")))), /*#__PURE__*/React.createElement("div", {
+    title: "Start a new exam. The current exam stays saved.",
+    className: "text-xs bg-slate-800 px-3 py-1 rounded hover:bg-slate-700 transition-colors"
+  }, "New exam"))), /*#__PURE__*/React.createElement(ExamSaveBar, {
+    saveState: saveState,
+    folder: folder,
+    committedId: committedId,
+    hasData: ExamStore.hasExamData(formData, initialData),
+    onFolder: chooseFolder,
+    onOpen: showOpenPanel
+  })), /*#__PURE__*/React.createElement("div", {
     className: "max-w-3xl mx-auto p-4 md:p-6"
   }, /*#__PURE__*/React.createElement("div", {
     className: "bg-white rounded-lg shadow-sm p-4 mb-4 border-l-4 border-blue-500"
@@ -5307,13 +5908,21 @@ const BiomechanicsExam = () => {
       /*#__PURE__*/React.createElement("div", null,
         /*#__PURE__*/React.createElement("label", {
           className: "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1"
-        }, "Client ID ", /*#__PURE__*/React.createElement("span", { className: "text-gray-400 normal-case font-normal" }, "(for privacy-protected sharing)")),
+        }, "Client GUID ", /*#__PURE__*/React.createElement("span", { className: "text-gray-400 normal-case font-normal" }, "(names the saved file)"),
+          !formData.clientId && /*#__PURE__*/React.createElement("button", {
+            type: "button",
+            onClick: () => { const g = ExamStore.newGuid(); handleChange('clientId', g); formRef.current = { ...formRef.current, clientId: g }; commitGuid(g); },
+            className: "ml-2 text-[10px] normal-case font-bold text-blue-600 hover:underline"
+          }, "+ new GUID")),
         /*#__PURE__*/React.createElement("input", {
           type: "text",
+          id: "exam-client-guid",
           value: formData.clientId || '',
           onChange: e => handleChange('clientId', e.target.value),
-          placeholder: "e.g. PT-2026-001",
-          className: "w-full p-2 bg-gray-50 rounded border border-gray-200 font-medium"
+          onBlur: e => commitGuid(e.target.value),
+          onKeyDown: e => { if (e.key === 'Enter') e.target.blur(); },
+          placeholder: "Paste GUID (e.g. PT-2026-001)",
+          className: "w-full p-2 bg-gray-50 rounded border border-gray-200 font-medium font-mono text-sm"
         })
       )
     ),
